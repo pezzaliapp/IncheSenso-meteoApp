@@ -1,5 +1,5 @@
 const BASE_PATH = '/IncheSenso-meteoApp/';
-const CACHE_NAME = 'meteo-it-v3';
+const CACHE_NAME = 'meteo-it-v4';
 
 const STATIC_ASSETS = [
   BASE_PATH,

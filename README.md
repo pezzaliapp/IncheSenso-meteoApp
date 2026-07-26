@@ -87,3 +87,20 @@ zoom; oltre quello il server restituisce un'immagine con la scritta
 chiede mai tile oltre quel livello e riscala l'ultimo disponibile, così la
 scritta non può comparire. Se RainViewer alzerà il limite, basta alzare la
 costante.
+
+## ⚖️ Attribuzioni e limiti d'uso
+
+Le fonti sono citate nel footer dell'app, come richiesto dalle rispettive licenze
+(Open-Meteo richiede l'attribuzione CC BY 4.0). Nota che:
+
+- **Open-Meteo** e **RainViewer** sono gratuiti per uso **non commerciale**
+  (siti o app privati/no-profit, senza abbonamenti né pubblicità).
+- **Nominatim** (posizione GPS → comune) ha limiti che valgono *per applicazione*,
+  non per utente: massimo 1 richiesta al secondo sommando tutti gli utenti.
+  Con un numero moderato di utenti va bene; a volumi maggiori serve un altro
+  geocoder o un'istanza propria.
+- Le **tile OSM** sono infrastruttura donata: la normale navigazione interattiva è
+  consentita, il prefetch e la cache per uso offline no. Per questo il service
+  worker esclude esplicitamente le tile dalla cache.
+- L'animazione radar viene messa in pausa quando la mappa esce dallo schermo o
+  l'app va in background, per non scaricare tile inutilmente.

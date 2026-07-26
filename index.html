@@ -390,6 +390,23 @@
       .section { padding: 0 2rem 2rem; }
       #radar-map { height: 500px; }
     }
+    .app-footer {
+      padding: 1.5rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
+      border-top: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.72rem;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+    .app-footer a { color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }
+    .app-footer a:hover { color: var(--accent); }
+    .app-footer .credits { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; }
+    .app-footer .disclaimer {
+      margin-top: 0.9rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      color: #94a3b8;
+    }
+    @media (min-width: 768px) { .app-footer { padding-left: 2rem; padding-right: 2rem; } }
     .refresh-btn {
       background: transparent;
       border: 1px solid rgba(255,255,255,0.1);
@@ -503,7 +520,19 @@
     </div>
   </div>
 
-  <div style="height:2rem"></div>
+  <footer class="app-footer">
+    <div class="credits">
+      <span>Previsioni: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)</span>
+      <span>Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a></span>
+      <span>Mappa: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
+      <span>Allerte: Dipartimento della Protezione Civile via <a href="https://allertameteo.app" target="_blank" rel="noopener">allertameteo.app</a></span>
+    </div>
+    <p class="disclaimer">
+      App non ufficiale. I bollettini di criticità sono pubblicati dal Dipartimento della
+      Protezione Civile: questa app li rende comodi da consultare, non sostituisce i canali
+      ufficiali di allertamento. In caso di allerta segui le indicazioni delle autorità locali.
+    </p>
+  </footer>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -876,6 +905,7 @@ const MAP_MAX_ZOOM          = 12;  // oltre si può zoomare, il radar viene risc
 
 let radarMap = null;
 let radarHost = 'https://tilecache.rainviewer.com';
+let radarOnScreen = true;   // la mappa è dentro il viewport?
 
 function radarUrl(frame) {
   return radarHost + frame.path + '/256/{z}/{x}/{y}/2/1_1.png';
@@ -905,6 +935,15 @@ async function initRadar() {
   // Leaflet a volte misura male il contenitore se la mappa nasce fuori schermo
   setTimeout(() => radarMap.invalidateSize(), 300);
   window.addEventListener('resize', () => radarMap.invalidateSize());
+
+  // l'animazione gira solo quando la mappa è davvero sullo schermo:
+  // niente tile scaricate mentre l'utente legge le previsioni più in alto
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(entries => {
+      radarOnScreen = entries[0].isIntersecting;
+      syncRadarAnimation();
+    }, { threshold: 0.05 }).observe(document.getElementById('radar-map'));
+  }
 }
 
 async function loadRadarFrames() {
@@ -931,7 +970,7 @@ async function loadRadarFrames() {
     const note = document.getElementById('radar-note');
     if (note) note.textContent = 'Dati radar © RainViewer — aggiornamento ogni 10 min';
 
-    if (state.radarPlaying) startRadarAnimation();
+    syncRadarAnimation();
   } catch (e) {
     // la mappa resta navigabile: segnalo solo che il livello radar manca
     const note = document.getElementById('radar-note');
@@ -940,18 +979,35 @@ async function loadRadarFrames() {
 }
 
 function startRadarAnimation() {
-  if (state.radarInterval) clearInterval(state.radarInterval);
+  stopRadarAnimation();
   state.radarInterval = setInterval(() => {
     if (!state.radarFrames.length || !state.radarLayer) return;
     state.radarIndex = (state.radarIndex + 1) % state.radarFrames.length;
     state.radarLayer.setUrl(radarUrl(state.radarFrames[state.radarIndex]));
   }, 800);
 }
-document.getElementById('radar-play').addEventListener('click',function(){
-  state.radarPlaying=!state.radarPlaying;
-  this.textContent=state.radarPlaying?'⏸ Pausa':'▶ Play';
+
+function stopRadarAnimation() {
+  if (state.radarInterval) {
+    clearInterval(state.radarInterval);
+    state.radarInterval = null;
+  }
+}
+
+/* L'animazione consuma una tornata di tile ogni 800 ms: la teniamo accesa
+   solo se serve davvero — utente in play, mappa sullo schermo, app in primo
+   piano. Risparmia banda, batteria e carico sui server di RainViewer. */
+function syncRadarAnimation() {
+  const should = state.radarPlaying && radarOnScreen && !document.hidden &&
+                 state.radarFrames.length > 0 && state.radarLayer;
+  if (should && !state.radarInterval) startRadarAnimation();
+  else if (!should) stopRadarAnimation();
+}
+document.getElementById('radar-play').addEventListener('click', function () {
+  state.radarPlaying = !state.radarPlaying;
+  this.textContent = state.radarPlaying ? '⏸ Pausa' : '▶ Play';
   this.classList.toggle('active');
-  if (state.radarPlaying) startRadarAnimation(); else clearInterval(state.radarInterval);
+  syncRadarAnimation();
 });
 
 /* ============================================================
@@ -1057,12 +1113,16 @@ function updateHailRisk() {
 }
 
 /* LOAD ALL */
+const REFRESH_MS = 600000;   // 10 minuti
+let lastLoad = 0;
+
 async function runLoad() {
   document.getElementById('conn-status').textContent = '🟡 Aggiornamento…';
   try {
     await Promise.all([loadWeather(), loadAlerts()]);
     await initRadar();
   } finally {
+    lastLoad = Date.now();
     document.getElementById('conn-status').textContent = navigator.onLine ? '🟢 Online' : '🔴 Offline';
   }
 }
@@ -1083,7 +1143,14 @@ function loadAll() {
   locateMe({ silent: true });
 })();
 
-setInterval(loadAll, 600000);
+/* Aggiornamento periodico solo con l'app in primo piano; se è rimasta
+   in background più a lungo, recupera al ritorno invece di accumulare giri. */
+setInterval(() => { if (!document.hidden) loadAll(); }, REFRESH_MS);
+
+document.addEventListener('visibilitychange', () => {
+  syncRadarAnimation();
+  if (!document.hidden && Date.now() - lastLoad > REFRESH_MS) loadAll();
+});
 window.addEventListener('online',()=>document.getElementById('conn-status').textContent='🟢 Online');
 window.addEventListener('offline',()=>document.getElementById('conn-status').textContent='🔴 Offline');
 </script>
