@@ -1,13 +1,13 @@
 {
-  "name": "Meteo ER - Previsioni & Allerte Emilia-Romagna",
-  "short_name": "MeteoER",
+  "name": "Meteo Italia - Previsioni & Allerte Protezione Civile",
+  "short_name": "MeteoIT",
   "start_url": "/IncheSenso-meteoApp/",
   "scope": "/IncheSenso-meteoApp/",
   "display": "standalone",
   "background_color": "#0b1120",
   "theme_color": "#0b1120",
   "orientation": "portrait-primary",
-  "description": "Meteo, radar temporali e allerte Protezione Civile per l'Emilia-Romagna. Gratuito e open source.",
+  "description": "Meteo, radar temporali e allerte Protezione Civile per tutti i comuni italiani, in base alla posizione. Gratuito e open source.",
   "icons": [
     {
       "src": "icons/icon-72x72.svg",
@@ -58,6 +58,9 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["weather", "utilities"],
+  "categories": [
+    "weather",
+    "utilities"
+  ],
   "lang": "it-IT"
 }

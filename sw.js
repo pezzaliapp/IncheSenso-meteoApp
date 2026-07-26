@@ -1,5 +1,5 @@
 const BASE_PATH = '/IncheSenso-meteoApp/';
-const CACHE_NAME = 'meteo-er-v2';
+const CACHE_NAME = 'meteo-it-v3';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -15,6 +15,15 @@ const STATIC_ASSETS = [
   `${BASE_PATH}icons/icon-512x512.svg`,
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+];
+
+// Host i cui dati cambiano continuamente: prima la rete, la cache solo da offline.
+const LIVE_HOSTS = [
+  'open-meteo.com',
+  'rainviewer.com',
+  'allertameteo.app',
+  'nominatim.openstreetmap.org',
+  'api.bigdatacloud.net'
 ];
 
 self.addEventListener('install', (event) => {
@@ -41,46 +50,52 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function networkFirst(request) {
+  return fetch(request)
+    .then((response) => {
+      if (response.ok && request.method === 'GET') {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+      }
+      return response;
+    })
+    .catch(() => caches.match(request));
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+
+  if (request.method !== 'GET') return;
+
   const url = new URL(request.url);
 
-  if (
-    url.hostname.includes('open-meteo.com') ||
-    url.hostname.includes('rainviewer.com') ||
-    url.hostname.includes('allertameteo.app')
-  ) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, clone);
-            });
-          }
-
-          return response;
-        })
-        .catch(() => caches.match(request))
-    );
-
+  // Le tile della mappa non vanno messe in cache: sono migliaia e scadono subito.
+  if (url.hostname.includes('tile.openstreetmap.org') || url.hostname.includes('tilecache.rainviewer.com')) {
     return;
   }
 
+  if (LIVE_HOSTS.some((host) => url.hostname.includes(host))) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  // Il documento HTML va preso dalla rete quando possibile, altrimenti
+  // dopo un deploy l'iPhone continua a mostrare la versione vecchia.
+  if (request.mode === 'navigate' || (request.destination === 'document')) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  // Tutto il resto (icone, Leaflet): cache-first.
   event.respondWith(
     caches.match(request).then((cached) => {
       return (
         cached ||
         fetch(request).then((response) => {
-          if (response.ok && request.method === 'GET') {
+          if (response.ok) {
             const clone = response.clone();
-
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, clone);
-            });
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
-
           return response;
         })
       );

@@ -4,11 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0b1120">
-  <meta name="description" content="Meteo, radar e allerte Protezione Civile per l'Emilia-Romagna">
+  <meta name="description" content="Meteo, radar temporali e allerte Protezione Civile per tutti i comuni italiani">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="MeteoER">
-  <title>Meteo ER — Previsioni & Allerte</title>
+  <meta name="apple-mobile-web-app-title" content="MeteoIT">
+  <title>Meteo Italia — Previsioni & Allerte</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192x192.svg">
   <link rel="icon" type="image/svg+xml" href="icons/icon-72x72.svg">
@@ -35,29 +36,42 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      min-height: 100dvh;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
+      /* lascia respirare il contenuto sopra la home-bar iPhone */
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
+    /* --- FIX iOS: la status bar (ora, batteria, wifi) non deve coprire il titolo.
+       Con apple-mobile-web-app-status-bar-style=black-translucent + viewport-fit=cover
+       il contenuto parte da y=0, quindi va aggiunto env(safe-area-inset-top). --- */
     .app-header {
       background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
-      padding: 1.2rem 1rem 2rem;
+      padding-top: calc(0.9rem + env(safe-area-inset-top, 0px));
+      padding-right: calc(1rem + env(safe-area-inset-right, 0px));
+      padding-bottom: 2rem;
+      padding-left: calc(1rem + env(safe-area-inset-left, 0px));
       position: sticky;
       top: 0;
       z-index: 100;
       border-bottom: 1px solid rgba(255,255,255,0.05);
     }
     .app-header h1 {
-      font-size: 1.4rem;
+      font-size: 1.3rem;
       font-weight: 700;
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      min-width: 0;
     }
-    .app-header h1::before { content: '⛈️'; font-size: 1.6rem; }
+    .app-header h1 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app-header h1::before { content: '⛈️'; font-size: 1.5rem; flex: none; }
     .header-meta {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
       margin-top: 0.5rem;
       font-size: 0.8rem;
       color: var(--text-muted);
@@ -74,17 +88,59 @@
       position: relative;
       z-index: 101;
     }
-    .location-bar select {
-      flex: 1;
+    .search-wrap { flex: 1; position: relative; min-width: 0; }
+    .search-wrap input {
+      width: 100%;
       background: var(--surface-2);
       border: 1px solid rgba(255,255,255,0.08);
       color: var(--text);
       padding: 0.6rem 0.8rem;
       border-radius: 10px;
-      font-size: 0.95rem;
+      font-size: 1rem; /* >=16px: evita lo zoom automatico di iOS sul focus */
       outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .search-wrap input:focus { border-color: var(--accent); }
+    .search-results {
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      left: 0;
+      right: 0;
+      background: var(--surface-2);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      overflow: hidden auto;
+      max-height: 260px;
+      z-index: 200;
+    }
+    .search-results button {
+      display: block;
+      width: 100%;
+      background: none;
+      border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      color: var(--text);
+      text-align: left;
+      padding: 0.7rem 0.9rem;
+      font-size: 0.9rem;
+      font-family: inherit;
       cursor: pointer;
     }
+    .search-results button:last-child { border-bottom: none; }
+    .search-results button:hover, .search-results button:focus-visible { background: rgba(56,189,248,0.12); }
+    .search-results .res-sub { display: block; font-size: 0.75rem; color: var(--text-muted); }
+    .search-results .res-empty { padding: 0.8rem 0.9rem; font-size: 0.85rem; color: var(--text-muted); }
+    .current-place {
+      margin: -0.4rem 1rem 1rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .current-place strong { color: var(--text); font-weight: 600; }
     .location-bar button {
       background: var(--accent);
       border: none;
@@ -323,8 +379,14 @@
     .leaflet-control-zoom { border: none !important; }
     .leaflet-control-zoom a { background: var(--surface-2) !important; color: var(--text) !important; border: 1px solid rgba(255,255,255,0.08) !important; }
     @media (min-width: 768px) {
-      .app-header { padding: 1.5rem 2rem 2.5rem; }
+      .app-header {
+        padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
+        padding-right: calc(2rem + env(safe-area-inset-right, 0px));
+        padding-bottom: 2.5rem;
+        padding-left: calc(2rem + env(safe-area-inset-left, 0px));
+      }
       .location-bar { margin: -1.5rem 2rem 1.5rem; }
+      .current-place { margin: -0.8rem 2rem 1.5rem; }
       .section { padding: 0 2rem 2rem; }
       #radar-map { height: 500px; }
     }
@@ -347,7 +409,7 @@
 
 <div id="app">
   <header class="app-header">
-    <h1>Meteo Emilia-Romagna</h1>
+    <h1><span>Meteo Italia</span></h1>
     <div class="header-meta">
       <span id="clock">--:--</span>
       <span>
@@ -358,49 +420,16 @@
   </header>
 
   <div class="location-bar">
-    <select id="city-select">
-      <option value="" disabled>Scegli una città...</option>
-      <option value="bologna" selected>Bologna</option>
-      <option value="modena">Modena</option>
-      <option value="reggio nell'emilia">Reggio nell'Emilia</option>
-      <option value="parma">Parma</option>
-      <option value="piacenza">Piacenza</option>
-      <option value="ferrara">Ferrara</option>
-      <option value="ravenna">Ravenna</option>
-      <option value="forli">Forlì</option>
-      <option value="cesena">Cesena</option>
-      <option value="rimini">Rimini</option>
-      <option value="imola">Imola</option>
-      <option value="carpi">Carpi</option>
-      <option value="faenza">Faenza</option>
-      <option value="sassuolo">Sassuolo</option>
-      <option value="correggio">Correggio</option>
-      <option value="bagnacavallo">Bagnacavallo</option>
-      <option value="castel san pietro terme">Castel San Pietro Terme</option>
-      <option value="castelfranco emilia">Castelfranco Emilia</option>
-      <option value="cento">Cento</option>
-      <option value="copparo">Copparo</option>
-      <option value="crevalcore">Crevalcore</option>
-      <option value="fidenza">Fidenza</option>
-      <option value="formigine">Formigine</option>
-      <option value="lugo">Lugo</option>
-      <option value="mirandola">Mirandola</option>
-      <option value="nonantola">Nonantola</option>
-      <option value="novellara">Novellara</option>
-      <option value="pavullo nel frignano">Pavullo nel Frignano</option>
-      <option value="porretta terme">Porretta Terme</option>
-      <option value="reggiolo">Reggiolo</option>
-      <option value="rubiera">Rubiera</option>
-      <option value="san giovanni in persiceto">San Giovanni in Persiceto</option>
-      <option value="san lazzaro di savena">San Lazzaro di Savena</option>
-      <option value="santarcangelo di romagna">Santarcangelo di Romagna</option>
-      <option value="sasso marconi">Sasso Marconi</option>
-      <option value="scandiano">Scandiano</option>
-      <option value="vignola">Vignola</option>
-      <option value="zola predosa">Zola Predosa</option>
-    </select>
-    <button id="geo-btn" title="Usa la mia posizione">📍</button>
+    <div class="search-wrap">
+      <input id="city-input" type="search" placeholder="Cerca un comune italiano…"
+             autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search"
+             role="combobox" aria-expanded="false" aria-controls="city-results" aria-autocomplete="list">
+      <div class="search-results" id="city-results" role="listbox" hidden></div>
+    </div>
+    <button id="geo-btn" title="Usa la mia posizione" aria-label="Usa la mia posizione">📍</button>
   </div>
+
+  <div class="current-place" id="current-place">Rilevamento posizione…</div>
 
   <div class="section">
     <div class="notif-bar">
@@ -453,7 +482,7 @@
       </div>
       <button class="radar-btn active" id="radar-play">⏸ Pausa</button>
     </div>
-    <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem">Dati radar © RainViewer — aggiornamento ogni 10 min</p>
+    <p id="radar-note" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem">Dati radar © RainViewer — aggiornamento ogni 10 min</p>
   </div>
 
   <div class="section">
@@ -479,46 +508,41 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
-const CITIES = {
-  'bologna':{name:'Bologna',lat:44.4949,lon:11.3426},
-  'modena':{name:'Modena',lat:44.6471,lon:10.9252},
-  "reggio nell'emilia":{name:"Reggio nell'Emilia",lat:44.6978,lon:10.6305},
-  'parma':{name:'Parma',lat:44.8015,lon:10.3280},
-  'piacenza':{name:'Piacenza',lat:45.0526,lon:9.6930},
-  'ferrara':{name:'Ferrara',lat:44.8381,lon:11.6198},
-  'ravenna':{name:'Ravenna',lat:44.4184,lon:12.2035},
-  'forli':{name:'Forlì',lat:44.2227,lon:12.0407},
-  'cesena':{name:'Cesena',lat:44.1396,lon:12.2434},
-  'rimini':{name:'Rimini',lat:44.0571,lon:12.5647},
-  'imola':{name:'Imola',lat:44.3594,lon:11.7124},
-  'carpi':{name:'Carpi',lat:44.7824,lon:10.8850},
-  'faenza':{name:'Faenza',lat:44.2856,lon:11.8834},
-  'sassuolo':{name:'Sassuolo',lat:44.5442,lon:10.7857},
-  'correggio':{name:'Correggio',lat:44.7695,lon:10.8310},
-  'bagnacavallo':{name:'Bagnacavallo',lat:44.4139,lon:11.9753},
-  'castel san pietro terme':{name:'Castel San Pietro Terme',lat:44.3969,lon:11.5864},
-  'castelfranco emilia':{name:'Castelfranco Emilia',lat:44.5947,lon:11.0492},
-  'cento':{name:'Cento',lat:44.7269,lon:11.2864},
-  'copparo':{name:'Copparo',lat:44.8914,lon:11.8264},
-  'crevalcore':{name:'Crevalcore',lat:44.7214,lon:11.1469},
-  'fidenza':{name:'Fidenza',lat:44.8657,lon:10.0606},
-  'formigine':{name:'Formigine',lat:44.5767,lon:10.8464},
-  'lugo':{name:'Lugo',lat:44.4212,lon:11.9087},
-  'mirandola':{name:'Mirandola',lat:44.8862,lon:11.0654},
-  'nonantola':{name:'Nonantola',lat:44.6778,lon:11.0347},
-  'novellara':{name:'Novellara',lat:44.8456,lon:10.7269},
-  'pavullo nel frignano':{name:'Pavullo nel Frignano',lat:44.3328,lon:10.8344},
-  'porretta terme':{name:'Porretta Terme',lat:44.1603,lon:10.9181},
-  'reggiolo':{name:'Reggiolo',lat:44.7667,lon:10.8167},
-  'rubiera':{name:'Rubiera',lat:44.6514,lon:10.7814},
-  'san giovanni in persiceto':{name:'San Giovanni in Persiceto',lat:44.6389,lon:11.1833},
-  'san lazzaro di savena':{name:'San Lazzaro di Savena',lat:44.4708,lon:11.4083},
-  'santarcangelo di romagna':{name:'Santarcangelo di Romagna',lat:44.0625,lon:12.4464},
-  'sasso marconi':{name:'Sasso Marconi',lat:44.4008,lon:11.2525},
-  'scandiano':{name:'Scandiano',lat:44.6000,lon:10.6833},
-  'vignola':{name:'Vignola',lat:44.4808,lon:10.9992},
-  'zola predosa':{name:'Zola Predosa',lat:44.4889,lon:11.2181}
-};
+/* ============================================================
+   LOCALITÀ — copertura nazionale
+   Le allerte vengono da allertameteo.app, che ripubblica i bollettini
+   di criticità della Protezione Civile per tutti i 7.904 comuni italiani.
+   Non c'è più una lista fissa di città: si cerca o si usa il GPS.
+   ============================================================ */
+
+const DEFAULT_PLACE = { comune:'Roma', provincia:'Roma', regione:'Lazio', lat:41.8931, lon:12.4828 };
+const STORE_KEY = 'meteo-it-place';
+
+/* Slug nel formato usato da allertameteo.app:
+   "Forlì" -> forli | "Reggio nell'Emilia" -> reggio-nellemilia | "Bolzano/Bozen" -> bolzanobozen */
+function slugify(name) {
+  return (name || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')          // via gli accenti
+    .toLowerCase()
+    .replace(/['\u2018\u2019\u02bc\u0060\u00b4\/]/g, '')       // apostrofi e slash spariscono
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/* Più tentativi: i nomi restituiti dal geocoder non sempre coincidono
+   con quelli dell'anagrafe ISTAT (es. "Roma Capitale", "Forlì (FC)"). */
+function slugCandidates(name) {
+  const raw = (name || '').trim();
+  const variants = [
+    raw,
+    raw.replace(/\s*\(.*?\)\s*/g, ' '),                        // via "(FC)"
+    raw.replace(/^(comune di|citt[àa] di|municipio di)\s+/i, ''),
+    raw.replace(/\s+capitale$/i, ''),
+    raw.split('/')[0],                                          // "Bolzano/Bozen" -> "Bolzano"
+    raw.replace(/['\u2019]/g, '-')                              // "Sant'Angelo" -> "sant-angelo"
+  ];
+  return [...new Set(variants.map(slugify).filter(Boolean))];
+}
 
 const WMO = {
   0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',
@@ -540,8 +564,10 @@ const WMO_DESC = {
 };
 
 let state = {
-  city:'bologna',lat:44.4949,lon:11.3426,alerts:null,weather:null,
-  radarPlaying:true,radarFrames:[],radarLayer:null,radarInterval:null,radarIndex:0,notifications:false
+  comune:DEFAULT_PLACE.comune, provincia:DEFAULT_PLACE.provincia, regione:DEFAULT_PLACE.regione,
+  lat:DEFAULT_PLACE.lat, lon:DEFAULT_PLACE.lon, slug:slugify(DEFAULT_PLACE.comune),
+  alerts:null, weather:null,
+  radarPlaying:true, radarFrames:[], radarLayer:null, radarInterval:null, radarIndex:0, notifications:false
 };
 
 /* SERVICE WORKER */
@@ -566,7 +592,7 @@ notifToggle.addEventListener('click',async()=>{
     if (perm==='granted') {
       state.notifications=true; notifToggle.classList.add('on');
       localStorage.setItem('meteo-er-notif','1');
-      new Notification('Meteo ER',{body:'Notifiche attivate per '+CITIES[state.city].name});
+      new Notification('Meteo Italia',{body:'Notifiche attivate per '+state.comune});
     }
   } else {
     state.notifications=false; notifToggle.classList.remove('on');
@@ -582,27 +608,185 @@ function sendAlertNotification(title,body) {
   }
 }
 
-/* CITY SELECTION */
-const citySelect = document.getElementById('city-select');
-citySelect.addEventListener('change',(e)=>{
-  const slug=e.target.value;
-  if (CITIES[slug]) {
-    state.city=slug; state.lat=CITIES[slug].lat; state.lon=CITIES[slug].lon;
-    loadAll();
+/* ============================================================
+   RICERCA COMUNE (tutta Italia) + POSIZIONE RILEVATA
+   ============================================================ */
+const cityInput   = document.getElementById('city-input');
+const cityResults = document.getElementById('city-results');
+const placeLabel  = document.getElementById('current-place');
+
+function esc(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, ch => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]
+  ));
+}
+
+/* "Provincia di Pescara" / "Città Metropolitana di Bologna" -> "Pescara" / "Bologna" */
+function cleanProvincia(v) {
+  return (v || '')
+    .replace(/^(?:provincia(?:\s+autonoma)?|citt[\u00e0a]\s+metropolitana|libero\s+consorzio\s+comunale)\s+(?:di\s+|della\s+|del\s+|dell['\u2019])?/i, '')
+    .trim();
+}
+
+function renderPlaceLabel(note) {
+  const prov = state.provincia && state.provincia !== state.comune ? ' (' + state.provincia + ')' : '';
+  placeLabel.innerHTML = '📍 <strong>' + esc(state.comune) + '</strong>' + esc(prov) +
+    (state.regione ? ' · ' + esc(state.regione) : '') +
+    (note ? ' <span style="color:var(--warning)">· ' + esc(note) + '</span>' : '');
+}
+
+function applyPlace(place, save) {
+  state.comune    = place.comune || DEFAULT_PLACE.comune;
+  state.provincia = place.provincia || '';
+  state.regione   = place.regione || '';
+  state.lat       = place.lat;
+  state.lon       = place.lon;
+  state.slug      = slugify(state.comune);
+  state.slugTries = slugCandidates(state.comune).concat(
+    place.altName ? slugCandidates(place.altName) : []
+  );
+  state.slugTries = [...new Set(state.slugTries)];
+  renderPlaceLabel();
+  if (save !== false) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(place)); } catch (e) {}
   }
-});
-document.getElementById('geo-btn').addEventListener('click',()=>{
-  if (!navigator.geolocation) return alert('Geolocalizzazione non supportata');
-  navigator.geolocation.getCurrentPosition(pos=>{
-    state.lat=pos.coords.latitude; state.lon=pos.coords.longitude;
-    let best='bologna',bestD=Infinity;
-    for (const [slug,c] of Object.entries(CITIES)) {
-      const d=Math.hypot(c.lat-state.lat,c.lon-state.lon);
-      if (d<bestD){bestD=d;best=slug;}
+}
+
+function setPlace(place) { applyPlace(place, true); closeResults(); loadAll(); }
+
+/* ---------- ricerca testuale (Open-Meteo geocoding, gratuito) ---------- */
+let searchTimer = null;
+
+function closeResults() {
+  cityResults.hidden = true;
+  cityResults.innerHTML = '';
+  cityInput.setAttribute('aria-expanded', 'false');
+}
+
+function openResults(html) {
+  cityResults.innerHTML = html;
+  cityResults.hidden = false;
+  cityInput.setAttribute('aria-expanded', 'true');
+}
+
+async function searchComuni(q) {
+  const url = 'https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(q) +
+              '&count=20&language=it&format=json';
+  const res  = await fetch(url);
+  const data = await res.json();
+  return (data.results || []).filter(r => r.country_code === 'IT').slice(0, 8);
+}
+
+cityInput.addEventListener('input', () => {
+  const q = cityInput.value.trim();
+  clearTimeout(searchTimer);
+  if (q.length < 3) { closeResults(); return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const results = await searchComuni(q);
+      if (!results.length) {
+        openResults('<div class="res-empty">Nessun comune trovato. Prova con il nome completo.</div>');
+        return;
+      }
+      openResults(results.map((r, i) => {
+        const prov = cleanProvincia(r.admin2);
+        const sub    = [prov, r.admin1].filter(Boolean).join(' · ');
+        return '<button type="button" role="option" data-i="' + i + '">' +
+               esc(r.name) + '<span class="res-sub">' + esc(sub) + '</span></button>';
+      }).join(''));
+      cityResults.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const r = results[+btn.dataset.i];
+          cityInput.value = '';
+          setPlace({
+            comune:    r.admin3 || r.name,
+            altName:   r.name,
+            provincia: cleanProvincia(r.admin2),
+            regione:   r.admin1 || '',
+            lat:       r.latitude,
+            lon:       r.longitude
+          });
+        });
+      });
+    } catch (e) {
+      openResults('<div class="res-empty">Ricerca non disponibile. Controlla la connessione.</div>');
     }
-    state.city=best; citySelect.value=best; loadAll();
-  },()=>alert('Impossibile ottenere la posizione'));
+  }, 300);
 });
+
+cityInput.addEventListener('keydown', e => { if (e.key === 'Escape') closeResults(); });
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) closeResults();
+});
+
+/* ---------- posizione rilevata -> comune ---------- */
+async function reverseGeocode(lat, lon) {
+  // 1) Nominatim (OpenStreetMap)
+  try {
+    const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&addressdetails=1' +
+                '&accept-language=it&lat=' + lat + '&lon=' + lon;
+    const res  = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    const a = data.address || {};
+    const comune = a.city || a.town || a.village || a.municipality || a.county;
+    if (comune) {
+      return {
+        comune:    comune,
+        provincia: cleanProvincia(a.county || a.state_district || ''),
+        regione:   a.state || ''
+      };
+    }
+  } catch (e) {}
+  // 2) fallback: BigDataCloud (endpoint client, senza chiave)
+  try {
+    const url = 'https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=it&latitude=' +
+                lat + '&longitude=' + lon;
+    const res  = await fetch(url);
+    const data = await res.json();
+    const comune = data.city || data.locality;
+    if (comune) {
+      return {
+        comune:    comune,
+        provincia: cleanProvincia((data.localityInfo && data.localityInfo.administrative || [])
+                     .filter(x => x.adminLevel === 6).map(x => x.name)[0] || ''),
+        regione:   data.principalSubdivision || ''
+      };
+    }
+  } catch (e) {}
+  return null;
+}
+
+async function locateMe(opts) {
+  opts = opts || {};
+  if (!navigator.geolocation) {
+    if (!opts.silent) placeLabel.textContent = 'Geolocalizzazione non supportata da questo browser.';
+    return;
+  }
+  if (!opts.silent) placeLabel.textContent = 'Rilevamento posizione…';
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude, lon = pos.coords.longitude;
+    const place = await reverseGeocode(lat, lon);
+    if (place) {
+      setPlace(Object.assign(place, { lat: lat, lon: lon }));
+    } else {
+      // meteo e radar funzionano comunque con le sole coordinate
+      state.lat = lat; state.lon = lon;
+      renderPlaceLabel('comune non identificato');
+      loadAll();
+    }
+  }, err => {
+    if (!opts.silent) {
+      const msg = err.code === 1
+        ? 'Posizione negata. Cerca il comune a mano oppure abilita la posizione in Impostazioni.'
+        : 'Posizione non disponibile. Cerca il comune a mano.';
+      placeLabel.innerHTML = '⚠️ ' + esc(msg);
+    } else {
+      renderPlaceLabel();
+    }
+  }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
+}
+
+document.getElementById('geo-btn').addEventListener('click', () => locateMe({ silent: false }));
 
 /* REFRESH */
 document.getElementById('refresh-btn').addEventListener('click',function(){
@@ -647,18 +831,23 @@ function renderCurrent(data) {
     </div>`;
 }
 function renderHourly(data) {
-  const hourly=data.hourly, now=new Date(), currentHour=now.getHours();
-  let html='';
-  for (let i=0;i<24;i++) {
-    const h=(currentHour+i)%24;
-    const idx=hourly.time.findIndex(t=>new Date(t).getHours()===h && new Date(t)>=now)||i;
-    const safeIdx=Math.min(idx+i,hourly.time.length-1);
-    const time=hourly.time[safeIdx], temp=hourly.temperature_2m[safeIdx], code=hourly.weather_code[safeIdx];
-    const rainProb=hourly.precipitation_probability[safeIdx];
-    const d=new Date(time), label=i===0?'Ora':d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});
-    html+=`<div class="hour-item"><div class="time">${label}</div><div class="icon">${WMO[code]||'❓'}</div><div class="temp">${Math.round(temp)}°</div><div class="rain">${rainProb>0?'💧 '+rainProb+'%':''}</div></div>`;
+  const hourly = data.hourly, now = Date.now();
+  let start = hourly.time.findIndex(t => new Date(t).getTime() >= now);
+  if (start < 0) start = 0;
+  let html = '';
+  for (let i = 0; i < 24; i++) {
+    const idx = start + i;
+    if (idx >= hourly.time.length) break;
+    const d     = new Date(hourly.time[idx]);
+    const label = i === 0 ? 'Ora' : d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    const code  = hourly.weather_code[idx];
+    const rain  = hourly.precipitation_probability[idx];
+    html += '<div class="hour-item"><div class="time">' + label + '</div>' +
+            '<div class="icon">' + (WMO[code] || '❓') + '</div>' +
+            '<div class="temp">' + Math.round(hourly.temperature_2m[idx]) + '°</div>' +
+            '<div class="rain">' + (rain > 0 ? '💧 ' + rain + '%' : '') + '</div></div>';
   }
-  document.getElementById('hourly-list').innerHTML=html;
+  document.getElementById('hourly-list').innerHTML = html;
 }
 function renderDaily(data) {
   const daily=data.daily; let html='';
@@ -672,40 +861,91 @@ function renderDaily(data) {
   document.getElementById('daily-list').innerHTML=html;
 }
 
-/* RADAR */
-let radarMap=null;
-async function initRadar() {
-  if (radarMap) { radarMap.setView([state.lat,state.lon],8); return; }
-  radarMap=L.map('radar-map',{zoomControl:true}).setView([state.lat,state.lon],8);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OSM',maxZoom:10}).addTo(radarMap);
-  await loadRadarFrames();
+/* ============================================================
+   RADAR
+   I tile radar gratuiti di RainViewer esistono solo fino a un certo
+   zoom: oltre quello il server restituisce un PNG con la scritta
+   "Zoom Level Not Supported". La soluzione è maxNativeZoom: Leaflet
+   smette di chiedere tile oltre quel livello e riscala l'ultimo
+   disponibile, così la scritta non può più comparire.
+   Se in futuro RainViewer alza il limite, basta alzare questo numero.
+   ============================================================ */
+const RADAR_MAX_NATIVE_ZOOM = 7;   // livello massimo servito da RainViewer
+const RADAR_START_ZOOM      = 7;   // zoom iniziale: tile nitidi, niente watermark
+const MAP_MAX_ZOOM          = 12;  // oltre si può zoomare, il radar viene riscalato
+
+let radarMap = null;
+let radarHost = 'https://tilecache.rainviewer.com';
+
+function radarUrl(frame) {
+  return radarHost + frame.path + '/256/{z}/{x}/{y}/2/1_1.png';
 }
+
+async function initRadar() {
+  if (radarMap) {
+    // non resetto lo zoom/pan scelto dall'utente: sposto solo il centro
+    radarMap.setView([state.lat, state.lon], radarMap.getZoom(), { animate: false });
+    await loadRadarFrames();
+    return;
+  }
+  radarMap = L.map('radar-map', {
+    zoomControl: true,
+    minZoom: 4,
+    maxZoom: MAP_MAX_ZOOM
+  }).setView([state.lat, state.lon], RADAR_START_ZOOM);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OSM',
+    maxZoom: MAP_MAX_ZOOM,
+    maxNativeZoom: 18
+  }).addTo(radarMap);
+
+  await loadRadarFrames();
+
+  // Leaflet a volte misura male il contenitore se la mappa nasce fuori schermo
+  setTimeout(() => radarMap.invalidateSize(), 300);
+  window.addEventListener('resize', () => radarMap.invalidateSize());
+}
+
 async function loadRadarFrames() {
   try {
-    const res=await fetch('https://api.rainviewer.com/public/weather-maps.json');
-    const data=await res.json();
-    state.radarFrames=data.radar.past||[];
-    if (data.radar.nowcast) state.radarFrames=state.radarFrames.concat(data.radar.nowcast);
+    const res  = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+    const data = await res.json();
+    radarHost = data.host || radarHost;
+    state.radarFrames = (data.radar && data.radar.past) ? data.radar.past.slice() : [];
+    if (data.radar && data.radar.nowcast) state.radarFrames = state.radarFrames.concat(data.radar.nowcast);
     if (!state.radarFrames.length) return;
-    const host=data.host||'https://tilecache.rainviewer.com';
-    const latest=state.radarFrames[state.radarFrames.length-1];
+
+    const latest = state.radarFrames[state.radarFrames.length - 1];
+    state.radarIndex = state.radarFrames.length - 1;
+
     if (state.radarLayer) radarMap.removeLayer(state.radarLayer);
-    state.radarLayer=L.tileLayer(`${host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`,{opacity:0.65,attribution:'Radar © RainViewer'}).addTo(radarMap);
-    radarMap.setView([state.lat,state.lon],8);
+    state.radarLayer = L.tileLayer(radarUrl(latest), {
+      opacity: 0.65,
+      tileSize: 256,
+      maxZoom: MAP_MAX_ZOOM,
+      maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,   // <-- il fix
+      attribution: 'Radar &copy; RainViewer'
+    }).addTo(radarMap);
+
+    const note = document.getElementById('radar-note');
+    if (note) note.textContent = 'Dati radar © RainViewer — aggiornamento ogni 10 min';
+
     if (state.radarPlaying) startRadarAnimation();
-  } catch(e) {
-    document.getElementById('radar-map').innerHTML='<div class="error-msg" style="margin:2rem">Radar temporaneamente non disponibile</div>';
+  } catch (e) {
+    // la mappa resta navigabile: segnalo solo che il livello radar manca
+    const note = document.getElementById('radar-note');
+    if (note) note.innerHTML = '<span style="color:var(--warning)">Livello radar non raggiungibile. Riprova con 🔄 Aggiorna.</span>';
   }
 }
+
 function startRadarAnimation() {
   if (state.radarInterval) clearInterval(state.radarInterval);
-  state.radarInterval=setInterval(()=>{
-    if (!state.radarFrames.length||!state.radarLayer) return;
-    state.radarIndex=(state.radarIndex+1)%state.radarFrames.length;
-    const frame=state.radarFrames[state.radarIndex];
-    const host='https://tilecache.rainviewer.com';
-    state.radarLayer.setUrl(`${host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`);
-  },800);
+  state.radarInterval = setInterval(() => {
+    if (!state.radarFrames.length || !state.radarLayer) return;
+    state.radarIndex = (state.radarIndex + 1) % state.radarFrames.length;
+    state.radarLayer.setUrl(radarUrl(state.radarFrames[state.radarIndex]));
+  }, 800);
 }
 document.getElementById('radar-play').addEventListener('click',function(){
   state.radarPlaying=!state.radarPlaying;
@@ -714,26 +954,57 @@ document.getElementById('radar-play').addEventListener('click',function(){
   if (state.radarPlaying) startRadarAnimation(); else clearInterval(state.radarInterval);
 });
 
-/* ALERTS */
+/* ============================================================
+   ALLERTE PROTEZIONE CIVILE — tutta Italia
+   Fonte: allertameteo.app (ripubblica i bollettini di criticità DPC
+   per tutti i comuni italiani, API libera senza chiave).
+   ============================================================ */
 async function loadAlerts() {
-  const box=document.getElementById('alerts-box');
-  box.innerHTML='<div class="card" style="text-align:center;padding:2rem;color:var(--text-muted)">Caricamento allerte...</div>';
-  try {
-    const slug=encodeURIComponent(state.city);
-    const res=await fetch(`https://allertameteo.app/api/alert/${slug}`);
-    const data=await res.json();
-    if (!data.success) throw new Error('Dati non disponibili');
-    state.alerts=data.data;
-    renderAlerts(data.data); updateTrafficLight(data.data); updateHailRisk();
-    const lastAlert=localStorage.getItem('meteo-er-last-alert-'+state.city);
-    const currentLevel=data.data.oggi.allerta.livello;
-    if (lastAlert && parseInt(lastAlert)<currentLevel) {
-      sendAlertNotification('⚠️ Allerta meteo '+data.data.comune,'Nuova allerta: '+data.data.oggi.allerta.descrizione);
-    }
-    localStorage.setItem('meteo-er-last-alert-'+state.city,currentLevel);
-  } catch(e) {
-    box.innerHTML='<div class="error-msg">Impossibile caricare le allerte. Verifica la connessione.</div>';
+  const box = document.getElementById('alerts-box');
+  box.innerHTML = '<div class="card" style="text-align:center;padding:2rem;color:var(--text-muted)">Caricamento allerte…</div>';
+
+  const tries = (state.slugTries && state.slugTries.length) ? state.slugTries : [state.slug];
+  let data = null;
+
+  for (const slug of tries) {
+    if (!slug) continue;
+    try {
+      const res = await fetch('https://allertameteo.app/api/alert/' + encodeURIComponent(slug));
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json && json.success && json.data) { data = json.data; break; }
+    } catch (e) { /* provo il candidato successivo */ }
   }
+
+  if (!data) {
+    box.innerHTML = '<div class="error-msg">Allerte non disponibili per <strong>' + esc(state.comune) +
+      '</strong>. Il bollettino esce ogni giorno verso le 16:00: riprova più tardi, o cerca il comune capoluogo più vicino.</div>';
+    state.alerts = null;
+    updateHailRisk();
+    return;
+  }
+
+  state.alerts = data;
+  renderAlerts(data);
+  updateTrafficLight(data);
+  updateHailRisk();
+
+  // se l'API ha agganciato un omonimo in un'altra provincia, lo segnalo
+  if (state.provincia && data.provincia) {
+    const a = slugify(data.provincia), b = slugify(state.provincia);
+    if (a && b && !a.includes(b) && !b.includes(a)) {
+      renderPlaceLabel('allerte da ' + data.comune + ' (' + data.provincia + ')');
+    }
+  }
+
+  const key = 'meteo-it-last-alert-' + slugify(data.comune);
+  const previous = localStorage.getItem(key);
+  const currentLevel = data.oggi.allerta.livello;
+  if (previous && parseInt(previous, 10) < currentLevel) {
+    sendAlertNotification('⚠️ Allerta meteo ' + data.comune,
+                          'Nuova allerta: ' + data.oggi.allerta.descrizione);
+  }
+  try { localStorage.setItem(key, currentLevel); } catch (e) {}
 }
 function renderAlerts(data) {
   const levels={1:'green',2:'yellow',3:'orange',4:'red'};
@@ -786,14 +1057,33 @@ function updateHailRisk() {
 }
 
 /* LOAD ALL */
-async function loadAll() {
-  document.getElementById('conn-status').textContent='🟡 Aggiornamento...';
-  await Promise.all([loadWeather(),loadAlerts()]);
-  await initRadar();
-  document.getElementById('conn-status').textContent='🟢 Online';
+async function runLoad() {
+  document.getElementById('conn-status').textContent = '🟡 Aggiornamento…';
+  try {
+    await Promise.all([loadWeather(), loadAlerts()]);
+    await initRadar();
+  } finally {
+    document.getElementById('conn-status').textContent = navigator.onLine ? '🟢 Online' : '🔴 Offline';
+  }
 }
-loadAll();
-setInterval(loadAll,600000);
+/* le richieste vengono messe in coda, non scartate: se il GPS risponde
+   mentre e' in corso il primo caricamento, il secondo giro parte comunque */
+let loadQueue = Promise.resolve();
+function loadAll() {
+  loadQueue = loadQueue.then(runLoad, runLoad);
+  return loadQueue;
+}
+
+/* AVVIO: mostro subito l'ultima località usata, poi provo a rilevare la posizione */
+(function bootstrap() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (e) {}
+  applyPlace(saved && saved.comune ? saved : DEFAULT_PLACE, false);
+  loadAll();
+  locateMe({ silent: true });
+})();
+
+setInterval(loadAll, 600000);
 window.addEventListener('online',()=>document.getElementById('conn-status').textContent='🟢 Online');
 window.addEventListener('offline',()=>document.getElementById('conn-status').textContent='🔴 Offline');
 </script>
