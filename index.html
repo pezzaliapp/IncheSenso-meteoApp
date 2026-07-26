@@ -8,8 +8,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="MeteoIT">
-  <title>Meteo Italia — Previsioni & Allerte</title>
+  <meta name="apple-mobile-web-app-title" content="IncheSenso">
+  <title>IncheSenso Meteo — Previsioni & Allerte</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192x192.svg">
   <link rel="icon" type="image/svg+xml" href="icons/icon-72x72.svg">
@@ -426,7 +426,7 @@
 
 <div id="app">
   <header class="app-header">
-    <h1><span>Meteo Italia</span></h1>
+    <h1><span>IncheSenso Meteo</span></h1>
     <div class="header-meta">
       <span id="clock">--:--</span>
       <span>
@@ -621,7 +621,7 @@ notifToggle.addEventListener('click',async()=>{
     if (perm==='granted') {
       state.notifications=true; notifToggle.classList.add('on');
       localStorage.setItem('meteo-er-notif','1');
-      new Notification('Meteo Italia',{body:'Notifiche attivate per '+state.comune});
+      new Notification('IncheSenso Meteo',{body:'Notifiche attivate per '+state.comune});
     }
   } else {
     state.notifications=false; notifToggle.classList.remove('on');

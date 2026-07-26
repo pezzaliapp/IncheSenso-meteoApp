@@ -1,4 +1,4 @@
-# 🌩️ Meteo Italia — PWA Previsioni & Allerte
+# 🌩️ IncheSenso Meteo — PWA Previsioni & Allerte
 
 Una Progressive Web App gratuita e open source per il monitoraggio meteo, radar temporali e allerte Protezione Civile in **tutti i 7.904 comuni italiani**, in base alla posizione rilevata. Nessuna API key richiesta.
 
@@ -72,7 +72,7 @@ Attiva il toggle "Notifiche allerte" nel browser. L'app controlla ogni 10 minuti
 
 - **Android (Chrome)**: Menu ⋮ → "Aggiungi a schermata Home"
 - **iOS (Safari)**: Condividi ⬆️ → "Aggiungi alla schermata Home"
-- **Desktop**: Chrome/Edge → Menu ⋮ → "Installa MeteoIT"
+- **Desktop**: Chrome/Edge → Menu ⋮ → "Installa IncheSenso"
 
 ## 📝 Licenza
 

@@ -1,5 +1,8 @@
-const BASE_PATH = '/IncheSenso-meteoApp/';
-const CACHE_NAME = 'meteo-it-v4';
+/* Percorso ricavato dalla posizione di questo file: funziona sia in una
+   sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
+   e sopravvive a una rinomina del repository senza modifiche. */
+const BASE_PATH = new URL('./', self.location).pathname;
+const CACHE_NAME = 'meteo-it-v5';
 
 const STATIC_ASSETS = [
   BASE_PATH,

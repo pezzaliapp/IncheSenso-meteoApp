@@ -1,8 +1,8 @@
 {
-  "name": "Meteo Italia - Previsioni & Allerte Protezione Civile",
-  "short_name": "MeteoIT",
-  "start_url": "/IncheSenso-meteoApp/",
-  "scope": "/IncheSenso-meteoApp/",
+  "name": "IncheSenso Meteo — Previsioni & Allerte Protezione Civile",
+  "short_name": "IncheSenso",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0b1120",
   "theme_color": "#0b1120",
