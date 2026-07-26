@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v7';
+const CACHE_NAME = 'meteo-it-v8';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -34,7 +34,6 @@ self.addEventListener('install', (event) => {
     caches
       .open(CACHE_NAME)
       .then((cache) => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -51,6 +50,20 @@ self.addEventListener('activate', (event) => {
       )
       .then(() => self.clients.claim())
   );
+});
+
+/* La pagina ci parla: 'SKIP_WAITING' quando l'utente tocca Aggiorna,
+   'GET_VERSION' per mostrare la versione in esecuzione nel footer. */
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+
+  if (data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+
+  if (data.type === 'GET_VERSION' && event.ports && event.ports[0]) {
+    event.ports[0].postMessage({ version: CACHE_NAME });
+  }
 });
 
 function networkFirst(request) {

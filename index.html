@@ -423,6 +423,36 @@
       .section { padding: 0 2rem 2rem; }
       #radar-map { height: 500px; }
     }
+    .update-bar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.9rem 1rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
+      background: var(--surface-2);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 -6px 24px rgba(0,0,0,0.45);
+      transform: translateY(110%);
+      transition: transform 0.25s ease;
+    }
+    .update-bar.show { transform: translateY(0); }
+    .update-bar p { flex: 1; min-width: 0; font-size: 0.85rem; }
+    .update-bar .update-btn {
+      flex: none;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      padding: 0.55rem 1.1rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .update-bar .update-btn:disabled { opacity: 0.6; cursor: default; }
+    @media (prefers-reduced-motion: reduce) { .update-bar { transition: none; } }
     .app-footer {
       padding: 1.5rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
       border-top: 1px solid rgba(255,255,255,0.05);
@@ -560,6 +590,7 @@
       <span>Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a></span>
       <span>Mappa: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
       <span>Allerte: Dipartimento della Protezione Civile via <a href="https://allertameteo.app" target="_blank" rel="noopener">allertameteo.app</a></span>
+      <span id="app-version"></span>
     </div>
     <p class="disclaimer">
       App non ufficiale. I bollettini di criticità sono pubblicati dal Dipartimento della
@@ -567,6 +598,11 @@
       ufficiali di allertamento. In caso di allerta segui le indicazioni delle autorità locali.
     </p>
   </footer>
+</div>
+
+<div class="update-bar" id="update-bar" role="status" aria-live="polite" hidden>
+  <p>È disponibile una nuova versione.</p>
+  <button type="button" class="update-btn" id="update-btn">Aggiorna</button>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -633,11 +669,75 @@ let state = {
   radarPlaying:true, radarFrames:[], radarLayer:null, radarInterval:null, radarIndex:0, notifications:false
 };
 
-/* SERVICE WORKER */
+/* ============================================================
+   SERVICE WORKER E AGGIORNAMENTI
+   Quando pubblichi una nuova versione (basta cambiare CACHE_NAME in
+   sw.js) il nuovo worker si installa e resta in attesa. La pagina se ne
+   accorge e mostra la barra "Aggiorna": al tocco il worker prende il
+   controllo e la pagina si ricarica sulla versione nuova.
+   ============================================================ */
+const updateBar = document.getElementById('update-bar');
+const updateBtn = document.getElementById('update-btn');
+let waitingWorker = null;
+let reloadingForUpdate = false;
+
+function showUpdateBar(worker) {
+  waitingWorker = worker;
+  updateBar.hidden = false;
+  requestAnimationFrame(() => updateBar.classList.add('show'));
+}
+
+updateBtn.addEventListener('click', () => {
+  updateBtn.disabled = true;
+  updateBtn.textContent = 'Aggiorno…';
+  if (waitingWorker) waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  else location.reload();
+  // rete lenta o worker che non risponde: ricarico comunque
+  setTimeout(() => { if (!reloadingForUpdate) location.reload(); }, 4000);
+});
+
+function askAppVersion() {
+  const ctrl = navigator.serviceWorker.controller;
+  const el = document.getElementById('app-version');
+  if (!ctrl || !el) return;
+  const channel = new MessageChannel();
+  channel.port1.onmessage = e => {
+    if (e.data && e.data.version) el.textContent = 'Versione ' + e.data.version;
+  };
+  ctrl.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
+}
+
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then(()=>{
-    console.log('SW registrato');
-  }).catch(err=>console.log('SW errore',err));
+  // il worker nuovo ha preso il controllo: ricarico una volta sola
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    askAppVersion();
+
+    // aggiornamento già pronto da una visita precedente
+    if (reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
+
+    reg.addEventListener('updatefound', () => {
+      const incoming = reg.installing;
+      if (!incoming) return;
+      incoming.addEventListener('statechange', () => {
+        // se non c'è un controller è la primissima installazione: niente barra
+        if (incoming.state === 'installed' && navigator.serviceWorker.controller) {
+          showUpdateBar(incoming);
+        }
+      });
+    });
+
+    // controlla se abbiamo pubblicato qualcosa: ogni 30 minuti e al rientro in primo piano
+    setInterval(() => reg.update().catch(() => {}), 1800000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) reg.update().catch(() => {});
+    });
+  }).catch(() => {});
 }
 
 /* CLOCK */

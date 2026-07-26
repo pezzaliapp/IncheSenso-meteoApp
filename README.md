@@ -104,3 +104,22 @@ Le fonti sono citate nel footer dell'app, come richiesto dalle rispettive licenz
   worker esclude esplicitamente le tile dalla cache.
 - L'animazione radar viene messa in pausa quando la mappa esce dallo schermo o
   l'app va in background, per non scaricare tile inutilmente.
+
+## 🔄 Come pubblicare un aggiornamento
+
+L'app avvisa gli utenti da sola. Il flusso è questo:
+
+1. Modifica i file (`index.html`, `sw.js`, ...).
+2. **Incrementa `CACHE_NAME` in `sw.js`** (es. da `meteo-it-v8` a `meteo-it-v9`).
+   È l'unico passaggio obbligatorio: il browser rileva un aggiornamento solo se
+   il file `sw.js` cambia nei byte.
+3. Fai il commit e il push.
+
+Chi ha l'app aperta vede comparire in basso la barra **"È disponibile una nuova
+versione — Aggiorna"**: al tocco il nuovo service worker prende il controllo e la
+pagina si ricarica. Il controllo avviene ogni 30 minuti e ogni volta che l'app
+torna in primo piano. Chi la riapre da zero riceve già la versione nuova, perché
+l'HTML è servito con strategia network-first.
+
+La versione in esecuzione è mostrata in fondo alla pagina: comoda per capire
+cosa sta effettivamente usando un utente che segnala un problema.
