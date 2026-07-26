@@ -123,11 +123,14 @@
       display: flex;
       flex-direction: column;
       align-items: stretch;
+      justify-content: flex-start;
       gap: 0.1rem;
       width: 100%;
+      height: auto;
       min-width: 0;
       background: none;
       border: none;
+      border-radius: 0;
       border-bottom: 1px solid rgba(255,255,255,0.05);
       color: var(--text);
       text-align: left;
@@ -162,7 +165,9 @@
       gap: 0.35rem;
     }
     .current-place strong { color: var(--text); font-weight: 600; }
-    .location-bar button {
+    /* figlio diretto: altrimenti questa regola colpirebbe anche i <button>
+       dei risultati di ricerca, che stanno dentro .search-wrap */
+    .location-bar > button {
       background: var(--accent);
       border: none;
       color: #000;
@@ -176,7 +181,7 @@
       justify-content: center;
       transition: transform 0.2s;
     }
-    .location-bar button:active { transform: scale(0.95); }
+    .location-bar > button:active { transform: scale(0.95); }
     .section { padding: 0 1rem 1.5rem; }
     .section-title {
       font-size: 0.85rem;
@@ -356,6 +361,13 @@
       border-radius: 12px;
       margin-bottom: 1rem;
     }
+    .notif-note {
+      margin: -0.5rem 0 0;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: var(--text-muted);
+    }
+    .notif-note.warn { color: var(--warning); }
     .toggle {
       width: 48px;
       height: 26px;
@@ -472,8 +484,9 @@
   <div class="section">
     <div class="notif-bar">
       <span>🔔 Notifiche allerte</span>
-      <div class="toggle" id="notif-toggle"></div>
+      <div class="toggle" id="notif-toggle" role="switch" aria-checked="false" tabindex="0" aria-label="Attiva le notifiche di allerta"></div>
     </div>
+    <p class="notif-note" id="notif-note" hidden></p>
   </div>
 
   <div class="section">
@@ -634,27 +647,86 @@ function updateClock() {
 }
 setInterval(updateClock,1000); updateClock();
 
-/* NOTIFICATIONS */
+/* ============================================================
+   NOTIFICHE
+   Su iPhone l'API Notification NON esiste finché la PWA non è stata
+   aggiunta alla schermata Home (iOS 16.4+). In scheda Safari il toggle
+   fallirebbe in silenzio: qui lo intercettiamo e spieghiamo cosa fare.
+   ============================================================ */
 const notifToggle = document.getElementById('notif-toggle');
-notifToggle.addEventListener('click',async()=>{
-  if (!state.notifications) {
-    const perm = await Notification.requestPermission();
-    if (perm==='granted') {
-      state.notifications=true; notifToggle.classList.add('on');
-      localStorage.setItem('meteo-er-notif','1');
-      new Notification('IncheSenso Meteo',{body:'Notifiche attivate per '+state.comune});
-    }
-  } else {
-    state.notifications=false; notifToggle.classList.remove('on');
-    localStorage.setItem('meteo-er-notif','0');
-  }
-});
-if (localStorage.getItem('meteo-er-notif')==='1') {
-  state.notifications=true; notifToggle.classList.add('on');
+const notifNote   = document.getElementById('notif-note');
+
+const NOTIF_SUPPORTED = typeof window.Notification === 'function';
+const IS_STANDALONE =
+  window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true;
+const IS_IOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function showNotifNote(msg, warn) {
+  if (!msg) { notifNote.hidden = true; notifNote.textContent = ''; return; }
+  notifNote.textContent = msg;
+  notifNote.classList.toggle('warn', !!warn);
+  notifNote.hidden = false;
 }
-function sendAlertNotification(title,body) {
-  if (state.notifications && Notification.permission==='granted') {
-    new Notification(title,{body,icon:'icons/icon-192x192.svg'});
+
+function setNotifState(on) {
+  state.notifications = on;
+  notifToggle.classList.toggle('on', on);
+  notifToggle.setAttribute('aria-checked', on ? 'true' : 'false');
+  try { localStorage.setItem('meteo-it-notif', on ? '1' : '0'); } catch (e) {}
+}
+
+async function toggleNotifications() {
+  if (!NOTIF_SUPPORTED) {
+    showNotifNote(
+      IS_IOS && !IS_STANDALONE
+        ? 'Su iPhone le notifiche servono l\'app installata: tocca Condividi ⬆️ in Safari, poi "Aggiungi alla schermata Home" e riapri IncheSenso Meteo da lì.'
+        : 'Questo browser non supporta le notifiche.',
+      true
+    );
+    return;
+  }
+
+  if (state.notifications) {
+    setNotifState(false);
+    showNotifNote(null);
+    return;
+  }
+
+  let perm;
+  try { perm = await Notification.requestPermission(); } catch (e) { perm = 'denied'; }
+
+  if (perm === 'granted') {
+    setNotifState(true);
+    showNotifNote('Ti avvisiamo quando il livello di allerta sale. Gli avvisi arrivano mentre l\'app è aperta.');
+    new Notification('IncheSenso Meteo', { body: 'Notifiche attivate per ' + state.comune });
+  } else if (perm === 'denied') {
+    showNotifNote('Notifiche bloccate. Riattivale dalle impostazioni del browser per questo sito.', true);
+  } else {
+    showNotifNote('Permesso non concesso: tocca di nuovo per riprovare.', true);
+  }
+}
+
+notifToggle.addEventListener('click', toggleNotifications);
+notifToggle.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNotifications(); }
+});
+
+/* ripristino: solo se il permesso è ancora valido */
+if (NOTIF_SUPPORTED &&
+    localStorage.getItem('meteo-it-notif') === '1' &&
+    Notification.permission === 'granted') {
+  setNotifState(true);
+} else if (IS_IOS && !IS_STANDALONE) {
+  showNotifNote('Per ricevere le allerte anche a schermo spento, aggiungi l\'app alla schermata Home.');
+}
+
+function sendAlertNotification(title, body) {
+  if (!NOTIF_SUPPORTED) return;
+  if (state.notifications && Notification.permission === 'granted') {
+    new Notification(title, { body: body, icon: 'icons/icon-192x192.svg' });
   }
 }
 
