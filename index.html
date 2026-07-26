@@ -30,6 +30,9 @@
       --radius: 16px;
       --shadow: 0 4px 24px rgba(0,0,0,0.4);
     }
+    /* Safari iOS ingrandisce da solo alcuni blocchi di testo ("text autosizing"):
+       su un layout stretto questo faceva traboccare i risultati di ricerca. */
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -112,25 +115,43 @@
       border-radius: 12px;
       box-shadow: var(--shadow);
       overflow: hidden auto;
-      max-height: 260px;
+      -webkit-overflow-scrolling: touch;
+      max-height: 45vh;
       z-index: 200;
     }
     .search-results button {
-      display: block;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.1rem;
       width: 100%;
+      min-width: 0;
       background: none;
       border: none;
       border-bottom: 1px solid rgba(255,255,255,0.05);
       color: var(--text);
       text-align: left;
       padding: 0.7rem 0.9rem;
-      font-size: 0.9rem;
       font-family: inherit;
+      line-height: 1.3;
       cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
     }
     .search-results button:last-child { border-bottom: none; }
     .search-results button:hover, .search-results button:focus-visible { background: rgba(56,189,248,0.12); }
-    .search-results .res-sub { display: block; font-size: 0.75rem; color: var(--text-muted); }
+    /* una riga ciascuna: se il nome è lungo si tronca, non deborda sulla riga sotto */
+    .search-results .res-name,
+    .search-results .res-sub {
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .search-results .res-name { font-size: 0.95rem; font-weight: 500; color: var(--text); }
+    .search-results .res-sub  { font-size: 0.78rem; font-weight: 400; color: var(--text-muted); }
     .search-results .res-empty { padding: 0.8rem 0.9rem; font-size: 0.85rem; color: var(--text-muted); }
     .current-place {
       margin: -0.4rem 1rem 1rem;
@@ -719,9 +740,12 @@ cityInput.addEventListener('input', () => {
       }
       openResults(results.map((r, i) => {
         const prov = cleanProvincia(r.admin2);
-        const sub    = [prov, r.admin1].filter(Boolean).join(' · ');
+        // se la provincia si chiama come il comune non la ripeto ("Bari · Bari · Puglia")
+        const sub = [prov === r.name ? '' : prov, r.admin1].filter(Boolean).join(' · ');
         return '<button type="button" role="option" data-i="' + i + '">' +
-               esc(r.name) + '<span class="res-sub">' + esc(sub) + '</span></button>';
+               '<span class="res-name">' + esc(r.name) + '</span>' +
+               (sub ? '<span class="res-sub">' + esc(sub) + '</span>' : '') +
+               '</button>';
       }).join(''));
       cityResults.querySelectorAll('button').forEach(btn => {
         btn.addEventListener('click', () => {
