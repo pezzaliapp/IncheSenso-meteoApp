@@ -453,6 +453,13 @@
     }
     .update-bar .update-btn:disabled { opacity: 0.6; cursor: default; }
     @media (prefers-reduced-motion: reduce) { .update-bar { transition: none; } }
+    .source-note {
+      margin-top: 0.6rem;
+      font-size: 0.75rem;
+      line-height: 1.5;
+      color: var(--text-muted);
+    }
+    .source-note a { color: var(--accent); }
     .app-footer {
       padding: 1.5rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
       border-top: 1px solid rgba(255,255,255,0.05);
@@ -520,7 +527,7 @@
   </div>
 
   <div class="section">
-    <div class="section-title">🚦 Stato temporali (radar + allerte)</div>
+    <div class="section-title">🚦 Stato temporali (bollettino DPC)</div>
     <div class="card">
       <div class="traffic-light">
         <div class="light blue" id="light-blue" title="Condizioni tranquille">☁️</div>
@@ -571,10 +578,11 @@
     <div class="alert-cards" id="alerts-box">
       <div class="card" style="text-align:center; padding:2rem; color:var(--text-muted)">Seleziona una città per vedere le allerte</div>
     </div>
+    <p class="source-note" id="alerts-source"></p>
   </div>
 
   <div class="section">
-    <div class="section-title">🧊 Rischio Grandine</div>
+    <div class="section-title">🧊 Rischio grandine (stima non ufficiale)</div>
     <div class="card" id="hail-card">
       <div class="hail-indicator">
         <div class="hail-icon">❓</div>
@@ -1237,6 +1245,7 @@ async function loadAlerts() {
   }
 
   state.alerts = data;
+  renderSource(data);
   renderAlerts(data);
   updateTrafficLight(data);
   updateHailRisk();
@@ -1258,54 +1267,161 @@ async function loadAlerts() {
   }
   try { localStorage.setItem(key, currentLevel); } catch (e) {}
 }
+/* Mostra la provenienza del bollettino. Cerchiamo un campo data fra quelli
+   plausibili: se l'API non lo espone lo diciamo, invece di far sembrare
+   attuale un bollettino che potrebbe essere di ieri. */
+function renderSource(data) {
+  const el = document.getElementById('alerts-source');
+  if (!el) return;
+  const campi = ['aggiornamento', 'data', 'data_bollettino', 'validita', 'valido_dal',
+                 'updated_at', 'last_update', 'timestamp'];
+  let quando = null;
+  for (const k of campi) {
+    if (data && data[k]) { quando = String(data[k]); break; }
+  }
+  el.innerHTML =
+    (quando
+      ? 'Bollettino di criticità: ' + esc(quando) + '. '
+      : 'Data di emissione del bollettino non fornita dalla fonte. ') +
+    'Il bollettino DPC esce ogni giorno entro le 16:00 e vale fino alla mezzanotte successiva. ' +
+    'In caso di dubbio verifica su <a href="https://www.protezionecivile.gov.it" target="_blank" rel="noopener">protezionecivile.gov.it</a> ' +
+    'o sul sito di allertamento della tua regione.';
+}
+
 function renderAlerts(data) {
   const levels={1:'green',2:'yellow',3:'orange',4:'red'};
   const badges={1:'badge-green',2:'badge-yellow',3:'badge-orange',4:'badge-red'};
   const icons={1:'✅',2:'⚠️',3:'🔶',4:'🚨'};
   const makeCard=(day,label)=>{
     const alert=day.allerta, det=day.dettagli, level=alert.livello;
-    return `<div class="alert-card alert-${levels[level]}"><div class="alert-title"><span>${icons[level]} ${label} — ${data.comune}</span><span class="alert-badge ${badges[level]}">${alert.colore}</span></div><div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">Zona: ${data.zona}</div><div class="alert-detail"><strong>🌩️ Temporali:</strong> ${det.temporali}<br><strong>🌊 Idraulico:</strong> ${det.idraulico}<br><strong>⛰️ Idrogeologico:</strong> ${det.idrogeologico}</div></div>`;
+    return `<div class="alert-card alert-${levels[level]}"><div class="alert-title"><span>${icons[level]} ${label} — ${data.comune}</span><span class="alert-badge ${badges[level]}">${alert.colore}</span></div><div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">Zona di allertamento: ${data.zona} — vale per l'intera zona e l'intera giornata</div><div class="alert-detail"><strong>🌩️ Temporali:</strong> ${det.temporali}<br><strong>🌊 Idraulico:</strong> ${det.idraulico}<br><strong>⛰️ Idrogeologico:</strong> ${det.idrogeologico}</div></div>`;
   };
   document.getElementById('alerts-box').innerHTML=makeCard(data.oggi,'Oggi')+makeCard(data.domani,'Domani');
 }
 
-/* TRAFFIC LIGHT */
-function updateTrafficLight(data) {
-  const today=data.oggi, temporal=today.dettagli.temporali.toLowerCase(), level=today.allerta.livello;
-  ['blue','yellow','red'].forEach(c=>document.getElementById('light-'+c).classList.remove('on'));
-  let status='', active='';
-  if (level>=3||temporal.includes('rossa')){active='red';status='🔴 TEMPORALI FORTI — Rischio grandine elevato';}
-  else if (level===2||temporal.includes('gialla')){active='yellow';status='🟡 TEMPORALI MODERATI — Presta attenzione';}
-  else {active='blue';status='🔵 CONDIZIONI TRANQUILLE — Nessun temporale previsto';}
-  document.getElementById('light-'+active).classList.add('on');
-  document.getElementById('traffic-status').textContent=status;
+/* ============================================================
+   LIVELLO DI ALLERTA PER SINGOLO RISCHIO
+   `allerta.livello` è il MASSIMO fra temporali, idraulico e idrogeologico:
+   usarlo per parlare di temporali attribuisce ai temporali un'allerta che
+   può riguardare piene o frane. Qui leggiamo il testo del singolo rischio.
+   Formato tipico: "Ordinaria / ALLERTA GIALLA", "Assenza di fenomeni
+   significativi prevedibili / NESSUNA ALLERTA".
+   ============================================================ */
+function livelloDaTesto(testo) {
+  const t = (testo || '').toLowerCase();
+  if (t.includes('nessuna allerta')) return 1;   // verde
+  if (t.includes('rossa'))     return 4;
+  if (t.includes('arancione')) return 3;
+  if (t.includes('gialla'))    return 2;
+  return 1;
 }
 
-/* HAIL RISK */
+const COLORI = {
+  1: { nome: 'verde',     css: 'var(--success)' },
+  2: { nome: 'giallo',    css: '#eab308' },
+  3: { nome: 'arancione', css: 'var(--warning)' },
+  4: { nome: 'rosso',     css: 'var(--danger)' }
+};
+
+/* TRAFFIC LIGHT — basato sul solo rischio temporali del bollettino */
+function updateTrafficLight(data) {
+  const oggi = data.oggi;
+  const lvlTemporali = livelloDaTesto(oggi.dettagli.temporali);
+  const lvlIdraulico = livelloDaTesto(oggi.dettagli.idraulico);
+  const lvlIdrogeo   = livelloDaTesto(oggi.dettagli.idrogeologico);
+
+  ['blue', 'yellow', 'red'].forEach(c =>
+    document.getElementById('light-' + c).classList.remove('on'));
+
+  let active, status;
+  if (lvlTemporali >= 3) {
+    active = 'red';
+    status = '🔴 Allerta temporali ' + COLORI[lvlTemporali].nome + ' — prevista oggi sulla zona';
+  } else if (lvlTemporali === 2) {
+    active = 'yellow';
+    status = '🟡 Allerta temporali gialla — criticità ordinaria prevista oggi sulla zona';
+  } else {
+    active = 'blue';
+    status = '🔵 Nessuna allerta temporali per oggi';
+    // un'allerta su un altro rischio non va spacciata per temporali
+    const altro = Math.max(lvlIdraulico, lvlIdrogeo);
+    if (altro >= 2) {
+      const quale = lvlIdraulico >= lvlIdrogeo ? 'idraulico' : 'idrogeologico';
+      status += ' (allerta ' + COLORI[altro].nome + ' per rischio ' + quale + ')';
+    }
+  }
+  document.getElementById('light-' + active).classList.add('on');
+  document.getElementById('traffic-status').textContent = status;
+}
+
+/* ============================================================
+   RISCHIO GRANDINE — stima, non un dato ufficiale
+   La grandine non è un rischio del bollettino DPC. Qui la deduciamo solo
+   da fatti verificabili: i codici WMO 96/99 delle previsioni (temporale
+   con grandine) e il livello di allerta temporali. Nessuna euristica
+   inventata su temperatura e umidità: generava allarmi a ciel sereno.
+   ============================================================ */
 function updateHailRisk() {
-  const card=document.getElementById('hail-card');
-  let risk='low', reason='';
+  const card = document.getElementById('hail-card');
+  let risk = 'low', reason = '';
+
   if (state.alerts) {
-    const temporal=state.alerts.oggi.dettagli.temporali.toLowerCase(), level=state.alerts.oggi.allerta.livello;
-    if (level>=3){risk='high';reason='Allerta temporali elevata in corso';}
-    else if (level===2){risk='medium';reason='Allerta temporali gialla attiva';}
+    const lvl = livelloDaTesto(state.alerts.oggi.dettagli.temporali);
+    if (lvl >= 3) {
+      risk = 'high';
+      reason = 'Allerta temporali ' + COLORI[lvl].nome + ' prevista oggi sulla zona.';
+    } else if (lvl === 2) {
+      risk = 'medium';
+      reason = 'Allerta temporali gialla prevista oggi sulla zona.';
+    }
   }
-  if (state.weather&&state.weather.current) {
-    const code=state.weather.current.weather_code;
-    if (code===96||code===99){risk='high';reason='Grandine rilevata nelle previsioni correnti';}
-    else if ([95,82,81].includes(code)&&risk!=='high'){risk='medium';reason=reason||'Temporali forti previsti';}
+
+  // le previsioni orarie sono l'unico indizio diretto di grandine
+  const codes = (state.weather && state.weather.hourly && state.weather.hourly.weather_code) || [];
+  const times = (state.weather && state.weather.hourly && state.weather.hourly.time) || [];
+  const now = Date.now();
+  let grandine = false, temporale = false;
+  for (let i = 0; i < codes.length; i++) {
+    const t = new Date(times[i]).getTime();
+    if (t < now || t > now + 12 * 3600 * 1000) continue;   // finestra: prossime 12 ore
+    if (codes[i] === 96 || codes[i] === 99) grandine = true;
+    else if (codes[i] === 95) temporale = true;
   }
-  if (state.weather&&state.weather.current) {
-    const t=state.weather.current.temperature_2m, h=state.weather.current.relative_humidity_2m;
-    if (t>28&&h>65&&risk==='low'){risk='medium';reason=reason||'Condizioni atmosferiche instabili (caldo-umido)';}
+  if (grandine) {
+    risk = 'high';
+    reason = 'Le previsioni indicano temporali con grandine nelle prossime ore.';
+  } else if (temporale && risk === 'low') {
+    risk = 'medium';
+    reason = 'Le previsioni indicano temporali nelle prossime ore.';
   }
-  const configs={
-    low:{icon:'🛡️',status:'Rischio basso',color:'var(--success)',desc:'Nessuna condizione favorevole alla grandine nelle prossime ore.',tips:['Puoi svolgere le normali attività','Monitora comunque il radar per sicurezza']},
-    medium:{icon:'⚡',status:'Rischio moderato',color:'var(--warning)',desc:reason||'Condizioni che potrebbero evolvere in temporali.',tips:["Parcheggia l'auto al riparo se possibile","Rimuovi oggetti fragili dai balconi","Tieni d'occhio il radar"]},
-    high:{icon:'🧊',status:'Rischio elevato',color:'var(--danger)',desc:reason||'Condizioni critiche per grandine in arrivo.',tips:["🚗 PARCHEGGIA SUBITO L'AUTO AL COPERTO","🏠 Chiudi persiane e finestre","📱 Resta in ascolto degli allarmi Protezione Civile","❌ Evita di circolare se non necessario"]}
+
+  const configs = {
+    low: {
+      icon: '🛡️', status: 'Rischio basso', color: COLORI[1].css,
+      desc: 'Nessuna allerta temporali per oggi e nessun temporale nelle previsioni delle prossime ore.',
+      tips: ['Nessuna precauzione particolare', 'Il radar resta il dato più aggiornato']
+    },
+    medium: {
+      icon: '⚡', status: 'Rischio moderato', color: COLORI[2].css,
+      desc: reason,
+      tips: ["Parcheggia l'auto al riparo se possibile", 'Rimuovi oggetti fragili dai balconi', "Tieni d'occhio il radar"]
+    },
+    high: {
+      icon: '🧊', status: 'Rischio elevato', color: COLORI[4].css,
+      desc: reason,
+      tips: ["🚗 Parcheggia l'auto al coperto", '🏠 Chiudi persiane e finestre',
+             '📱 Segui i canali ufficiali della Protezione Civile', '❌ Evita spostamenti non necessari']
+    }
   };
-  const cfg=configs[risk];
-  card.innerHTML=`<div class="hail-indicator"><div class="hail-icon">${cfg.icon}</div><div class="hail-status" style="color:${cfg.color}">${cfg.status}</div><div class="hail-desc">${cfg.desc}</div><ul class="hail-tips">${cfg.tips.map(t=>`<li>${t}</li>`).join('')}</ul></div>`;
+  const cfg = configs[risk];
+  card.innerHTML =
+    '<div class="hail-indicator">' +
+      '<div class="hail-icon">' + cfg.icon + '</div>' +
+      '<div class="hail-status" style="color:' + cfg.color + '">' + esc(cfg.status) + '</div>' +
+      '<div class="hail-desc">' + esc(cfg.desc) + '</div>' +
+      '<ul class="hail-tips">' + cfg.tips.map(t => '<li>' + t + '</li>').join('') + '</ul>' +
+      '<p class="source-note" style="text-align:center">Stima ricavata dal bollettino DPC e dalle previsioni, non un dato ufficiale sulla grandine.</p>' +
+    '</div>';
 }
 
 /* LOAD ALL */
