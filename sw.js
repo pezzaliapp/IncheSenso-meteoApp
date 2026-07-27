@@ -2,12 +2,13 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v12';
+const CACHE_NAME = 'meteo-it-v13';
 
 const STATIC_ASSETS = [
   BASE_PATH,
   `${BASE_PATH}index.html`,
   `${BASE_PATH}manifest.json`,
+  `${BASE_PATH}og-image.png`,
   `${BASE_PATH}icons/icon-72x72.svg`,
   `${BASE_PATH}icons/icon-96x96.svg`,
   `${BASE_PATH}icons/icon-128x128.svg`,
