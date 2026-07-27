@@ -614,7 +614,7 @@
       <span>Previsioni: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)</span>
       <span>Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a></span>
       <span>Mappa: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
-      <span>Allerte: Dipartimento della Protezione Civile via <a href="https://allertameteo.app" target="_blank" rel="noopener">allertameteo.app</a></span>
+      <span>Allerte: Bollettino di criticità del <a href="https://github.com/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica" target="_blank" rel="noopener">Dipartimento della Protezione Civile</a>, in CSV via <a href="https://github.com/opendatasicilia/DPC-bollettini-criticita-idrogeologica-idraulica" target="_blank" rel="noopener">OpenDataSicilia</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)</span>
       <span id="app-version"></span>
     </div>
     <p class="disclaimer">
@@ -642,7 +642,7 @@
 const DEFAULT_PLACE = { comune:'Roma', provincia:'Roma', regione:'Lazio', lat:41.8931, lon:12.4828 };
 const STORE_KEY = 'meteo-it-place';
 
-/* Slug nel formato usato da allertameteo.app:
+/* Slug normalizzato per confrontare nomi di comuni fra fonti diverse:
    "Forlì" -> forli | "Reggio nell'Emilia" -> reggio-nellemilia | "Bolzano/Bozen" -> bolzanobozen */
 function slugify(name) {
   return (name || '')
@@ -1240,131 +1240,268 @@ document.getElementById('radar-play').addEventListener('click', function () {
 });
 
 /* ============================================================
-   ALLERTE PROTEZIONE CIVILE — tutta Italia
-   Fonte: allertameteo.app (ripubblica i bollettini di criticità DPC
-   per tutti i comuni italiani, API libera senza chiave).
+   ALLERTE PROTEZIONE CIVILE — fonte ufficiale DPC
+   ------------------------------------------------------------
+   Perché non usiamo più un'API di comodo:
+   il Bollettino di criticità esce ogni giorno entro le 16:00 e contiene
+   DUE record — "oggi" (fino alle 23:59 del giorno di emissione) e "domani".
+   Dalla mezzanotte fino alla pubblicazione del giorno dopo, il bollettino
+   più recente è ancora quello di ieri: chi legge il campo chiamato "oggi"
+   senza guardarne la data mostra il giorno sbagliato per ~16 ore su 24.
+   Qui NON ci fidiamo del nome del campo: leggiamo data_validita_inizio e
+   data_validita_fine e teniamo il record la cui finestra contiene adesso.
+   Dati: repo opendatasicilia, derivato dal repo ufficiale pcm-dpc (CC BY 4.0).
    ============================================================ */
+const DPC_BASE   = 'https://raw.githubusercontent.com/opendatasicilia/DPC-bollettini-criticita-idrogeologica-idraulica/main/data';
+const DPC_ZONE   = DPC_BASE + '/zone/zone_comuni.csv';
+const DPC_OGGI   = DPC_BASE + '/bollettini/bollettino-oggi-zone-latest.csv';
+const DPC_DOMANI = DPC_BASE + '/bollettini/bollettino-domani-zone-latest.csv';
+
+/* --- CSV: zone_comuni.csv ha campi tra virgolette con virgole dentro --- */
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQ = false; }
+      } else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseCsv(text) {
+  const righe = text.trim().split(/\r?\n/);
+  const testa = parseCsvLine(righe[0]);
+  return righe.slice(1).map(r => {
+    const v = parseCsvLine(r), o = {};
+    testa.forEach((k, i) => { o[k] = v[i]; });
+    return o;
+  });
+}
+
+/* La tabella comune -> zona è statica: la scarichiamo una volta per sessione. */
+let zonePromise = null;
+function caricaZoneComuni() {
+  if (!zonePromise) {
+    zonePromise = fetch(DPC_ZONE)
+      .then(r => { if (!r.ok) throw new Error('zone ' + r.status); return r.text(); })
+      .then(parseCsv)
+      .catch(e => { zonePromise = null; throw e; });
+  }
+  return zonePromise;
+}
+
+function trovaZona(righe, comune, provincia) {
+  const c = slugify(comune), p = slugify(provincia || '');
+  const perNome = righe.filter(r => slugify(r.comune_nome) === c);
+  if (!perNome.length) return null;
+  if (perNome.length === 1) return perNome[0];
+  const conProvincia = perNome.filter(r => {
+    const rp = slugify(r.provincia_nome);
+    return p && (rp === p || rp.includes(p) || p.includes(rp));
+  });
+  return conProvincia.length === 1 ? conProvincia[0] : (conProvincia[0] || null);
+}
+
+/* --- classificazione temporale: è il nocciolo del fix ---
+   Il bollettino è definito nel fuso italiano. Se calcolassimo il giorno con
+   il fuso del dispositivo, un telefono impostato su UTC (o un utente
+   all'estero) vedrebbe la data sbagliata: qui fissiamo Europe/Rome. */
+const TZ = 'Europe/Rome';
+
+function giornoRoma(d) {
+  // 'sv-SE' restituisce il formato YYYY-MM-DD
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
+}
+
+function dataBreve(d) {
+  return new Intl.DateTimeFormat('it-IT', {
+    timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit'
+  }).format(d);
+}
+
+function oraBreve(d) {
+  return new Intl.DateTimeFormat('it-IT', {
+    timeZone: TZ, hour: '2-digit', minute: '2-digit'
+  }).format(d);
+}
+
+function etichettaGiorno(inizio, ora) {
+  const diff = Math.round(
+    (Date.parse(giornoRoma(inizio) + 'T00:00:00Z') - Date.parse(giornoRoma(ora) + 'T00:00:00Z')) / 86400000
+  );
+  const data = dataBreve(inizio);
+  if (diff === 0) return { testo: 'Oggi',    data: data, stato: 'corrente' };
+  if (diff === 1) return { testo: 'Domani',  data: data, stato: 'futuro' };
+  if (diff < 0)   return { testo: 'Scaduto', data: data, stato: 'scaduto' };
+  return { testo: data, data: data, stato: 'futuro' };
+}
+
+function normalizzaRecord(riga, ora) {
+  const inizio = new Date(riga.data_validita_inizio);
+  const fine   = new Date(riga.data_validita_fine);
+  const et     = etichettaGiorno(inizio, ora);
+  const dettagli = {
+    temporali:     riga.avviso_temporali,
+    idraulico:     riga.avviso_idraulico,
+    idrogeologico: riga.avviso_idrogeologico
+  };
+  const livello = Math.max(livelloDaTesto(dettagli.temporali),
+                           livelloDaTesto(dettagli.idraulico),
+                           livelloDaTesto(dettagli.idrogeologico));
+  return {
+    inizio: inizio, fine: fine, etichetta: et, dettagli: dettagli,
+    livello: livello, colore: COLORI[livello].nome.toUpperCase(),
+    pubblicato: new Date(riga.data_pubblicazione),
+    copreAdesso: ora >= inizio && ora <= fine
+  };
+}
+
 async function loadAlerts() {
   const box   = document.getElementById('alerts-box');
-  const token = placeToken;            // fotografia della località corrente
+  const token = placeToken;
   const comuneRichiesto = state.comune;
 
-  box.innerHTML = '<div class="card" style="text-align:center;padding:2rem;color:var(--text-muted)">Caricamento allerte…</div>';
+  box.innerHTML = '<div class="card" style="text-align:center;padding:2rem;color:var(--text-muted)">Caricamento bollettino…</div>';
   resetTrafficLight();
 
-  const tries = (state.slugTries && state.slugTries.length) ? state.slugTries : [state.slug];
-  let data = null, urlUsato = null, erroreRete = false;
-
-  for (const slug of tries) {
-    if (!slug) continue;
-    const url = 'https://allertameteo.app/api/alert/' + encodeURIComponent(slug);
-    try {
-      // cache:'no-store' -> mai una risposta vecchia del browser
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) continue;
-      const json = await res.json();
-      if (json && json.success && json.data) { data = json.data; urlUsato = url; break; }
-    } catch (e) { erroreRete = true; }
-  }
-
-  // la località è cambiata mentre aspettavamo: questa risposta è vecchia
-  if (token !== placeToken) return;
-
-  if (!data) {
-    box.innerHTML = '<div class="error-msg">' + (erroreRete
-      ? 'Allerte non raggiungibili in questo momento per <strong>' + esc(comuneRichiesto) +
-        '</strong>. Non mostriamo un bollettino vecchio: riprova con 🔄 Aggiorna.'
-      : 'Nessun bollettino disponibile per <strong>' + esc(comuneRichiesto) +
-        '</strong>. Prova con il comune capoluogo più vicino.') + '</div>';
+  let righeZone, testoOggi, testoDomani;
+  try {
+    [righeZone, testoOggi, testoDomani] = await Promise.all([
+      caricaZoneComuni(),
+      fetch(DPC_OGGI,   { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('oggi ' + r.status);   return r.text(); }),
+      fetch(DPC_DOMANI, { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('domani ' + r.status); return r.text(); })
+    ]);
+  } catch (e) {
+    if (token !== placeToken) return;
+    box.innerHTML = '<div class="error-msg">Bollettino della Protezione Civile non raggiungibile. ' +
+      'Non mostriamo dati vecchi: riprova con 🔄 Aggiorna.</div>';
     state.alerts = null;
     document.getElementById('alerts-source').textContent = '';
+    document.getElementById('diagnostica').innerHTML = '';
+    updateHailRisk();
+    return;
+  }
+  if (token !== placeToken) return;
+
+  const zc = trovaZona(righeZone, comuneRichiesto, state.provincia);
+  if (!zc) {
+    box.innerHTML = '<div class="error-msg">Non trovo <strong>' + esc(comuneRichiesto) +
+      '</strong> nell\'elenco dei comuni della Protezione Civile. Prova a cercarlo con il nome completo.</div>';
+    state.alerts = null;
     updateHailRisk();
     return;
   }
 
-  state.alerts = data;
-  renderSource(data);
-  renderAlerts(data);
-  updateTrafficLight(data);
+  const ora = new Date();
+  const trovaRiga = txt => parseCsv(txt).find(r => r.zona_codice === zc.zona_codice);
+  const record = [trovaRiga(testoOggi), trovaRiga(testoDomani)]
+    .filter(Boolean)
+    .map(r => normalizzaRecord(r, ora))
+    .sort((a, b) => a.inizio - b.inizio);
+
+  const corrente = record.find(r => r.copreAdesso) || null;
+  const futuri   = record.filter(r => r.inizio > ora);
+  const scaduti  = record.filter(r => !r.copreAdesso && r.inizio <= ora);
+
+  state.alerts = {
+    comune: zc.comune_nome, provincia: zc.provincia_nome, regione: zc.regione_nome,
+    zona: zc.zona_nome && zc.zona_nome !== zc.zona_codice
+            ? zc.zona_nome + ' (' + zc.zona_codice + ')' : zc.zona_codice,
+    pubblicato: record.length ? record[0].pubblicato : null,
+    oggi: corrente, futuri: futuri, scaduti: scaduti
+  };
+
+  renderAlerts(state.alerts);
+  renderSource(state.alerts);
+  renderDiagnostica(state.alerts, record);
+  if (corrente) updateTrafficLight(state.alerts); else resetTrafficLight('Nessun bollettino valido per adesso');
   updateHailRisk();
-  renderDiagnostica(data, urlUsato);
 
-  // se l'API ha agganciato un omonimo in un'altra provincia, lo segnalo
-  if (state.provincia && data.provincia) {
-    const a = slugify(data.provincia), b = slugify(state.provincia);
-    if (a && b && !a.includes(b) && !b.includes(a)) {
-      renderPlaceLabel('allerte da ' + data.comune + ' (' + data.provincia + ')');
+  if (corrente) {
+    const key = 'meteo-it-last-alert-' + slugify(zc.comune_nome);
+    const precedente = localStorage.getItem(key);
+    if (precedente && parseInt(precedente, 10) < corrente.livello) {
+      sendAlertNotification('⚠️ Allerta meteo ' + zc.comune_nome,
+        'Il livello è salito a ' + COLORI[corrente.livello].nome);
     }
+    try { localStorage.setItem(key, corrente.livello); } catch (e) {}
   }
-
-  const key = 'meteo-it-last-alert-' + slugify(data.comune);
-  const previous = localStorage.getItem(key);
-  const currentLevel = data.oggi.allerta.livello;
-  if (previous && parseInt(previous, 10) < currentLevel) {
-    sendAlertNotification('⚠️ Allerta meteo ' + data.comune,
-                          'Nuova allerta: ' + data.oggi.allerta.descrizione);
-  }
-  try { localStorage.setItem(key, currentLevel); } catch (e) {}
 }
 
-function resetTrafficLight() {
+function resetTrafficLight(msg) {
   ['blue', 'yellow', 'red'].forEach(c =>
     document.getElementById('light-' + c).classList.remove('on'));
-  document.getElementById('traffic-status').textContent = 'Caricamento bollettino…';
+  document.getElementById('traffic-status').textContent = msg || 'Caricamento bollettino…';
 }
 
-/* Pannello diagnostico: mostra ciò che l'API ha risposto davvero.
-   Serve a distinguere un errore dell'app da un dato sbagliato a monte. */
-function renderDiagnostica(data, url) {
-  const el = document.getElementById('diagnostica');
-  if (!el) return;
-  const riga = (k, v) => '<div><strong>' + esc(k) + ':</strong> ' + esc(v == null ? '—' : String(v)) + '</div>';
-  el.innerHTML =
-    '<details><summary>Dati grezzi ricevuti dalla fonte</summary><div class="diag-body">' +
-      riga('URL interrogato', url) +
-      riga('comune', data.comune) +
-      riga('provincia', data.provincia) +
-      riga('zona', data.zona) +
-      riga('oggi · livello', data.oggi && data.oggi.allerta && data.oggi.allerta.livello) +
-      riga('oggi · colore', data.oggi && data.oggi.allerta && data.oggi.allerta.colore) +
-      riga('oggi · temporali', data.oggi && data.oggi.dettagli && data.oggi.dettagli.temporali) +
-      riga('oggi · idraulico', data.oggi && data.oggi.dettagli && data.oggi.dettagli.idraulico) +
-      riga('oggi · idrogeologico', data.oggi && data.oggi.dettagli && data.oggi.dettagli.idrogeologico) +
-      riga('chiavi presenti', Object.keys(data).join(', ')) +
-      '<p style="margin-top:0.5rem">Se questi valori non coincidono con il bollettino ufficiale della tua regione, l\'errore è della fonte, non dell\'app.</p>' +
-    '</div></details>';
+function renderAlerts(a) {
+  const icone = { 1: '✅', 2: '⚠️', 3: '🔶', 4: '🚨' };
+  const classi = { 1: 'green', 2: 'yellow', 3: 'orange', 4: 'red' };
+  const card = (r) => {
+    const cls = classi[r.livello];
+    return '<div class="alert-card alert-' + cls + '">' +
+      '<div class="alert-title"><span>' + icone[r.livello] + ' ' + esc(r.etichetta.testo) +
+        ' — ' + esc(r.etichetta.data) + '</span>' +
+      '<span class="alert-badge badge-' + cls + '">' + esc(r.colore) + '</span></div>' +
+      '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">Zona di allertamento: ' +
+        esc(a.zona) + ' — vale per l\'intera zona, dalle ' +
+        oraBreve(r.inizio) + ' alle 23:59</div>' +
+      '<div class="alert-detail"><strong>🌩️ Temporali:</strong> ' + esc(r.dettagli.temporali) +
+      '<br><strong>🌊 Idraulico:</strong> ' + esc(r.dettagli.idraulico) +
+      '<br><strong>⛰️ Idrogeologico:</strong> ' + esc(r.dettagli.idrogeologico) + '</div></div>';
+  };
+
+  let html = '';
+  if (a.oggi) html += card(a.oggi);
+  a.futuri.forEach(r => { html += card(r); });
+  if (!a.oggi) {
+    html = '<div class="error-msg">Il bollettino più recente non copre la giornata di oggi. ' +
+           'Il prossimo esce entro le 16:00.</div>' + html;
+  }
+  if (!a.futuri.length) {
+    html += '<p class="source-note">La previsione per domani sarà disponibile con il bollettino di oggi, in uscita entro le 16:00.</p>';
+  }
+  document.getElementById('alerts-box').innerHTML = html;
 }
 
-/* Mostra la provenienza del bollettino. Cerchiamo un campo data fra quelli
-   plausibili: se l'API non lo espone lo diciamo, invece di far sembrare
-   attuale un bollettino che potrebbe essere di ieri. */
-function renderSource(data) {
+function renderSource(a) {
   const el = document.getElementById('alerts-source');
   if (!el) return;
-  const campi = ['aggiornamento', 'data', 'data_bollettino', 'validita', 'valido_dal',
-                 'updated_at', 'last_update', 'timestamp'];
-  let quando = null;
-  for (const k of campi) {
-    if (data && data[k]) { quando = String(data[k]); break; }
-  }
+  const quando = a.pubblicato
+    ? new Intl.DateTimeFormat('it-IT', { timeZone: TZ, weekday: 'long', day: '2-digit',
+        month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(a.pubblicato)
+    : null;
   el.innerHTML =
-    (quando
-      ? 'Bollettino di criticità: ' + esc(quando) + '. '
-      : 'Data di emissione del bollettino non fornita dalla fonte. ') +
-    'Il bollettino DPC esce ogni giorno entro le 16:00 e vale fino alla mezzanotte successiva. ' +
-    'In caso di dubbio verifica su <a href="https://www.protezionecivile.gov.it" target="_blank" rel="noopener">protezionecivile.gov.it</a> ' +
+    (quando ? 'Bollettino di criticità pubblicato ' + esc(quando) + '. ' : '') +
+    'Fonte: Dipartimento della Protezione Civile. Il bollettino esce ogni giorno entro le 16:00. ' +
+    'Verifica su <a href="https://www.protezionecivile.gov.it" target="_blank" rel="noopener">protezionecivile.gov.it</a> ' +
     'o sul sito di allertamento della tua regione.';
 }
 
-function renderAlerts(data) {
-  const levels={1:'green',2:'yellow',3:'orange',4:'red'};
-  const badges={1:'badge-green',2:'badge-yellow',3:'badge-orange',4:'badge-red'};
-  const icons={1:'✅',2:'⚠️',3:'🔶',4:'🚨'};
-  const makeCard=(day,label)=>{
-    const alert=day.allerta, det=day.dettagli, level=alert.livello;
-    return `<div class="alert-card alert-${levels[level]}"><div class="alert-title"><span>${icons[level]} ${label} — ${data.comune}</span><span class="alert-badge ${badges[level]}">${alert.colore}</span></div><div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">Zona di allertamento: ${data.zona} — vale per l'intera zona e l'intera giornata</div><div class="alert-detail"><strong>🌩️ Temporali:</strong> ${det.temporali}<br><strong>🌊 Idraulico:</strong> ${det.idraulico}<br><strong>⛰️ Idrogeologico:</strong> ${det.idrogeologico}</div></div>`;
-  };
-  document.getElementById('alerts-box').innerHTML=makeCard(data.oggi,'Oggi')+makeCard(data.domani,'Domani');
+function renderDiagnostica(a, record) {
+  const el = document.getElementById('diagnostica');
+  if (!el) return;
+  const riga = (k, v) => '<div><strong>' + esc(k) + ':</strong> ' + esc(v == null ? '—' : String(v)) + '</div>';
+  let corpo =
+    riga('comune', a.comune + ' (' + a.provincia + ', ' + a.regione + ')') +
+    riga('zona di allertamento', a.zona) +
+    riga('bollettino pubblicato', a.pubblicato ? a.pubblicato.toISOString() : '—') +
+    riga('ora del dispositivo', new Date().toISOString()) +
+    '<div style="margin-top:0.5rem"><strong>Record ricevuti:</strong></div>';
+  record.forEach(r => {
+    corpo += '<div style="margin-top:0.3rem">• ' + esc(r.etichetta.testo) + ' ' + esc(r.etichetta.data) +
+      ' — valido ' + esc(r.inizio.toISOString()) + ' → ' + esc(r.fine.toISOString()) +
+      (r.copreAdesso ? ' <strong>(copre adesso)</strong>' : ' (non copre adesso)') +
+      '<br>&nbsp;&nbsp;temporali: ' + esc(r.dettagli.temporali) + '</div>';
+  });
+  el.innerHTML = '<details><summary>Dati grezzi del bollettino</summary><div class="diag-body">' + corpo + '</div></details>';
 }
 
 /* ============================================================
@@ -1394,6 +1531,7 @@ const COLORI = {
 /* TRAFFIC LIGHT — basato sul solo rischio temporali del bollettino */
 function updateTrafficLight(data) {
   const oggi = data.oggi;
+  if (!oggi) { resetTrafficLight('Nessun bollettino valido per adesso'); return; }
   const lvlTemporali = livelloDaTesto(oggi.dettagli.temporali);
   const lvlIdraulico = livelloDaTesto(oggi.dettagli.idraulico);
   const lvlIdrogeo   = livelloDaTesto(oggi.dettagli.idrogeologico);
@@ -1404,13 +1542,13 @@ function updateTrafficLight(data) {
   let active, status;
   if (lvlTemporali >= 3) {
     active = 'red';
-    status = '🔴 Allerta temporali ' + COLORI[lvlTemporali].nome + ' — prevista oggi sulla zona';
+    status = '🔴 Allerta temporali ' + COLORI[lvlTemporali].nome + ' — ' + oggi.etichetta.testo.toLowerCase() + ' ' + oggi.etichetta.data;
   } else if (lvlTemporali === 2) {
     active = 'yellow';
-    status = '🟡 Allerta temporali gialla — criticità ordinaria prevista oggi sulla zona';
+    status = '🟡 Allerta temporali gialla — criticità ordinaria, ' + oggi.etichetta.testo.toLowerCase() + ' ' + oggi.etichetta.data;
   } else {
     active = 'blue';
-    status = '🔵 Nessuna allerta temporali per oggi';
+    status = '🔵 Nessuna allerta temporali — ' + oggi.etichetta.testo.toLowerCase() + ' ' + oggi.etichetta.data;
     // un'allerta su un altro rischio non va spacciata per temporali
     const altro = Math.max(lvlIdraulico, lvlIdrogeo);
     if (altro >= 2) {
@@ -1433,14 +1571,14 @@ function updateHailRisk() {
   const card = document.getElementById('hail-card');
   let risk = 'low', reason = '';
 
-  if (state.alerts) {
+  if (state.alerts && state.alerts.oggi) {
     const lvl = livelloDaTesto(state.alerts.oggi.dettagli.temporali);
     if (lvl >= 3) {
       risk = 'high';
-      reason = 'Allerta temporali ' + COLORI[lvl].nome + ' prevista oggi sulla zona.';
+      reason = 'Bollettino DPC: allerta temporali ' + COLORI[lvl].nome + ' sulla zona.';
     } else if (lvl === 2) {
       risk = 'medium';
-      reason = 'Allerta temporali gialla prevista oggi sulla zona.';
+      reason = 'Bollettino DPC: allerta temporali gialla sulla zona.';
     }
   }
 
@@ -1466,7 +1604,7 @@ function updateHailRisk() {
   const configs = {
     low: {
       icon: '🛡️', status: 'Rischio basso', color: COLORI[1].css,
-      desc: 'Nessuna allerta temporali per oggi e nessun temporale nelle previsioni delle prossime ore.',
+      desc: 'Nessuna allerta temporali nel bollettino e nessun temporale nelle previsioni delle prossime ore.',
       tips: ['Nessuna precauzione particolare', 'Il radar resta il dato più aggiornato']
     },
     medium: {

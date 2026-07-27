@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v11';
+const CACHE_NAME = 'meteo-it-v12';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -32,10 +32,20 @@ const LIVE_HOSTS = [
    il bollettino di ieri. Idem per il reverse geocoding: una posizione
    vecchia farebbe caricare le allerte del comune sbagliato. */
 const NEVER_CACHE_HOSTS = [
-  'allertameteo.app',
   'nominatim.openstreetmap.org',
   'api.bigdatacloud.net'
 ];
+
+/* I bollettini stanno su raw.githubusercontent.com insieme alla tabella
+   comune->zona, quindi qui la regola è sul PERCORSO, non sull'host:
+   - /bollettini/  cambia ogni giorno e non va MAI dalla cache
+   - /zone/        è statica e si può cachare tranquillamente */
+function isBollettino(url) {
+  return url.hostname === 'raw.githubusercontent.com' && url.pathname.includes('/bollettini/');
+}
+function isTabellaZone(url) {
+  return url.hostname === 'raw.githubusercontent.com' && url.pathname.includes('/zone/');
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -98,8 +108,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (NEVER_CACHE_HOSTS.some((host) => url.hostname.includes(host))) {
+  if (isBollettino(url) || NEVER_CACHE_HOSTS.some((host) => url.hostname.includes(host))) {
     event.respondWith(fetch(request));
+    return;
+  }
+
+  if (isTabellaZone(url)) {
+    event.respondWith(
+      caches.match(request).then((cached) =>
+        cached ||
+        fetch(request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        })
+      )
+    );
     return;
   }
 
