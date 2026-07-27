@@ -25,6 +25,12 @@
       --accent-2: #818cf8;
       --danger: #ef4444;
       --warning: #f59e0b;
+      /* Colori dei livelli di allerta DPC: unica sorgente di verità.
+         NON usare --warning per il giallo: è ambra e si legge come arancione. */
+      --dpc-verde:     #22c55e;
+      --dpc-giallo:    #facc15;
+      --dpc-arancione: #f97316;
+      --dpc-rosso:     #dc2626;   /* più scuro di --danger: il testo bianco del badge deve restare leggibile */
       --success: #22c55e;
       --info: #3b82f6;
       --radius: 16px;
@@ -311,9 +317,9 @@
       opacity: 0.4;
     }
     .light.on { opacity: 1; transform: scale(1.1); box-shadow: 0 0 20px currentColor; }
-    .light.blue { color: #60a5fa; border-color: #60a5fa; }
-    .light.yellow { color: #fbbf24; border-color: #fbbf24; }
-    .light.red { color: #f87171; border-color: #f87171; }
+    .light.blue   { color: #60a5fa;            border-color: #60a5fa; }
+    .light.yellow { color: var(--dpc-giallo);  border-color: var(--dpc-giallo); }
+    .light.red    { color: var(--dpc-rosso);   border-color: var(--dpc-rosso); }
     .alert-cards { display: grid; gap: 0.75rem; }
     .alert-card {
       border-radius: var(--radius);
@@ -322,10 +328,10 @@
       animation: fadeIn 0.4s ease;
     }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    .alert-green { background: rgba(34,197,94,0.08); border-color: var(--success); }
-    .alert-yellow { background: rgba(245,158,11,0.08); border-color: var(--warning); }
-    .alert-orange { background: rgba(249,115,22,0.08); border-color: #f97316; }
-    .alert-red { background: rgba(239,68,68,0.08); border-color: var(--danger); }
+    .alert-green  { background: rgba(34,197,94,0.08);  border-color: var(--dpc-verde); }
+    .alert-yellow { background: rgba(250,204,21,0.10); border-color: var(--dpc-giallo); }
+    .alert-orange { background: rgba(249,115,22,0.10); border-color: var(--dpc-arancione); }
+    .alert-red    { background: rgba(239,68,68,0.10);  border-color: var(--dpc-rosso); }
     .alert-card .alert-title { font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
     .alert-card .alert-badge {
       font-size: 0.7rem;
@@ -334,10 +340,10 @@
       font-weight: 700;
       text-transform: uppercase;
     }
-    .badge-green { background: var(--success); color: #000; }
-    .badge-yellow { background: var(--warning); color: #000; }
-    .badge-orange { background: #f97316; color: #fff; }
-    .badge-red { background: var(--danger); color: #fff; }
+    .badge-green  { background: var(--dpc-verde);     color: #000; }
+    .badge-yellow { background: var(--dpc-giallo);    color: #000; }
+    .badge-orange { background: var(--dpc-arancione); color: #000; }
+    .badge-red    { background: var(--dpc-rosso);     color: #fff; }
     .alert-card .alert-detail { margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; }
     .hail-indicator { text-align: center; padding: 1.5rem; }
     .hail-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
@@ -453,6 +459,16 @@
     }
     .update-bar .update-btn:disabled { opacity: 0.6; cursor: default; }
     @media (prefers-reduced-motion: reduce) { .update-bar { transition: none; } }
+    .diag { margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); }
+    .diag summary { cursor: pointer; padding: 0.3rem 0; }
+    .diag .diag-body {
+      margin-top: 0.4rem;
+      padding: 0.6rem 0.7rem;
+      background: var(--surface-2);
+      border-radius: 8px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
     .source-note {
       margin-top: 0.6rem;
       font-size: 0.75rem;
@@ -579,6 +595,7 @@
       <div class="card" style="text-align:center; padding:2rem; color:var(--text-muted)">Seleziona una città per vedere le allerte</div>
     </div>
     <p class="source-note" id="alerts-source"></p>
+    <div class="diag" id="diagnostica"></div>
   </div>
 
   <div class="section">
@@ -841,6 +858,7 @@ function sendAlertNotification(title, body) {
 /* ============================================================
    RICERCA COMUNE (tutta Italia) + POSIZIONE RILEVATA
    ============================================================ */
+let placeToken = 0;   // identifica la località corrente
 const cityInput   = document.getElementById('city-input');
 const cityResults = document.getElementById('city-results');
 const placeLabel  = document.getElementById('current-place');
@@ -866,6 +884,10 @@ function renderPlaceLabel(note) {
 }
 
 function applyPlace(place, save) {
+  // cambio località: le risposte ancora in volo per la località precedente
+  // non devono più dipingere nulla, e i dati vecchi vanno buttati subito
+  placeToken++;
+  state.alerts = null;
   state.comune    = place.comune || DEFAULT_PLACE.comune;
   state.provincia = place.provincia || '';
   state.regione   = place.regione || '';
@@ -1031,14 +1053,17 @@ document.getElementById('refresh-btn').addEventListener('click',function(){
 /* WEATHER */
 async function loadWeather() {
   const el=document.getElementById('current-card');
+  const token = placeToken;
   try {
     const url=`https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&timezone=Europe/Rome&forecast_days=7`;
     const res=await fetch(url);
     const data=await res.json();
+    if (token !== placeToken) return;   // località cambiata: risposta obsoleta
     state.weather=data;
     renderCurrent(data); renderHourly(data); renderDaily(data);
     updateHailRisk();
   } catch(e) {
+    if (token !== placeToken) return;
     el.innerHTML='<div class="error-msg">Errore caricamento meteo. Riprova più tardi.</div>';
   }
 }
@@ -1220,26 +1245,39 @@ document.getElementById('radar-play').addEventListener('click', function () {
    per tutti i comuni italiani, API libera senza chiave).
    ============================================================ */
 async function loadAlerts() {
-  const box = document.getElementById('alerts-box');
+  const box   = document.getElementById('alerts-box');
+  const token = placeToken;            // fotografia della località corrente
+  const comuneRichiesto = state.comune;
+
   box.innerHTML = '<div class="card" style="text-align:center;padding:2rem;color:var(--text-muted)">Caricamento allerte…</div>';
+  resetTrafficLight();
 
   const tries = (state.slugTries && state.slugTries.length) ? state.slugTries : [state.slug];
-  let data = null;
+  let data = null, urlUsato = null, erroreRete = false;
 
   for (const slug of tries) {
     if (!slug) continue;
+    const url = 'https://allertameteo.app/api/alert/' + encodeURIComponent(slug);
     try {
-      const res = await fetch('https://allertameteo.app/api/alert/' + encodeURIComponent(slug));
+      // cache:'no-store' -> mai una risposta vecchia del browser
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) continue;
       const json = await res.json();
-      if (json && json.success && json.data) { data = json.data; break; }
-    } catch (e) { /* provo il candidato successivo */ }
+      if (json && json.success && json.data) { data = json.data; urlUsato = url; break; }
+    } catch (e) { erroreRete = true; }
   }
 
+  // la località è cambiata mentre aspettavamo: questa risposta è vecchia
+  if (token !== placeToken) return;
+
   if (!data) {
-    box.innerHTML = '<div class="error-msg">Allerte non disponibili per <strong>' + esc(state.comune) +
-      '</strong>. Il bollettino esce ogni giorno verso le 16:00: riprova più tardi, o cerca il comune capoluogo più vicino.</div>';
+    box.innerHTML = '<div class="error-msg">' + (erroreRete
+      ? 'Allerte non raggiungibili in questo momento per <strong>' + esc(comuneRichiesto) +
+        '</strong>. Non mostriamo un bollettino vecchio: riprova con 🔄 Aggiorna.'
+      : 'Nessun bollettino disponibile per <strong>' + esc(comuneRichiesto) +
+        '</strong>. Prova con il comune capoluogo più vicino.') + '</div>';
     state.alerts = null;
+    document.getElementById('alerts-source').textContent = '';
     updateHailRisk();
     return;
   }
@@ -1249,6 +1287,7 @@ async function loadAlerts() {
   renderAlerts(data);
   updateTrafficLight(data);
   updateHailRisk();
+  renderDiagnostica(data, urlUsato);
 
   // se l'API ha agganciato un omonimo in un'altra provincia, lo segnalo
   if (state.provincia && data.provincia) {
@@ -1267,6 +1306,35 @@ async function loadAlerts() {
   }
   try { localStorage.setItem(key, currentLevel); } catch (e) {}
 }
+
+function resetTrafficLight() {
+  ['blue', 'yellow', 'red'].forEach(c =>
+    document.getElementById('light-' + c).classList.remove('on'));
+  document.getElementById('traffic-status').textContent = 'Caricamento bollettino…';
+}
+
+/* Pannello diagnostico: mostra ciò che l'API ha risposto davvero.
+   Serve a distinguere un errore dell'app da un dato sbagliato a monte. */
+function renderDiagnostica(data, url) {
+  const el = document.getElementById('diagnostica');
+  if (!el) return;
+  const riga = (k, v) => '<div><strong>' + esc(k) + ':</strong> ' + esc(v == null ? '—' : String(v)) + '</div>';
+  el.innerHTML =
+    '<details><summary>Dati grezzi ricevuti dalla fonte</summary><div class="diag-body">' +
+      riga('URL interrogato', url) +
+      riga('comune', data.comune) +
+      riga('provincia', data.provincia) +
+      riga('zona', data.zona) +
+      riga('oggi · livello', data.oggi && data.oggi.allerta && data.oggi.allerta.livello) +
+      riga('oggi · colore', data.oggi && data.oggi.allerta && data.oggi.allerta.colore) +
+      riga('oggi · temporali', data.oggi && data.oggi.dettagli && data.oggi.dettagli.temporali) +
+      riga('oggi · idraulico', data.oggi && data.oggi.dettagli && data.oggi.dettagli.idraulico) +
+      riga('oggi · idrogeologico', data.oggi && data.oggi.dettagli && data.oggi.dettagli.idrogeologico) +
+      riga('chiavi presenti', Object.keys(data).join(', ')) +
+      '<p style="margin-top:0.5rem">Se questi valori non coincidono con il bollettino ufficiale della tua regione, l\'errore è della fonte, non dell\'app.</p>' +
+    '</div></details>';
+}
+
 /* Mostra la provenienza del bollettino. Cerchiamo un campo data fra quelli
    plausibili: se l'API non lo espone lo diciamo, invece di far sembrare
    attuale un bollettino che potrebbe essere di ieri. */
@@ -1317,10 +1385,10 @@ function livelloDaTesto(testo) {
 }
 
 const COLORI = {
-  1: { nome: 'verde',     css: 'var(--success)' },
-  2: { nome: 'giallo',    css: '#eab308' },
-  3: { nome: 'arancione', css: 'var(--warning)' },
-  4: { nome: 'rosso',     css: 'var(--danger)' }
+  1: { nome: 'verde',     css: 'var(--dpc-verde)' },
+  2: { nome: 'giallo',    css: 'var(--dpc-giallo)' },
+  3: { nome: 'arancione', css: 'var(--dpc-arancione)' },
+  4: { nome: 'rosso',     css: 'var(--dpc-rosso)' }
 };
 
 /* TRAFFIC LIGHT — basato sul solo rischio temporali del bollettino */

@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v9';
+const CACHE_NAME = 'meteo-it-v11';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -20,10 +20,18 @@ const STATIC_ASSETS = [
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 ];
 
-// Host i cui dati cambiano continuamente: prima la rete, la cache solo da offline.
+/* Dati che cambiano di continuo: prima la rete, la cache solo da offline.
+   Il meteo vecchio è al massimo inutile. */
 const LIVE_HOSTS = [
   'open-meteo.com',
-  'rainviewer.com',
+  'rainviewer.com'
+];
+
+/* MAI dalla cache: un'allerta scaduta mostrata come attuale è peggio di
+   nessuna allerta. Se la rete non risponde, l'app deve dirlo, non pescare
+   il bollettino di ieri. Idem per il reverse geocoding: una posizione
+   vecchia farebbe caricare le allerte del comune sbagliato. */
+const NEVER_CACHE_HOSTS = [
   'allertameteo.app',
   'nominatim.openstreetmap.org',
   'api.bigdatacloud.net'
@@ -87,6 +95,11 @@ self.addEventListener('fetch', (event) => {
 
   // Le tile della mappa non vanno messe in cache: sono migliaia e scadono subito.
   if (url.hostname.includes('tile.openstreetmap.org') || url.hostname.includes('tilecache.rainviewer.com')) {
+    return;
+  }
+
+  if (NEVER_CACHE_HOSTS.some((host) => url.hostname.includes(host))) {
+    event.respondWith(fetch(request));
     return;
   }
 
