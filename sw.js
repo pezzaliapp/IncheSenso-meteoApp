@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v14';
+const CACHE_NAME = 'meteo-it-v15';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -40,12 +40,16 @@ const NEVER_CACHE_HOSTS = [
 /* I bollettini stanno su raw.githubusercontent.com insieme alla tabella
    comune->zona, quindi qui la regola è sul PERCORSO, non sull'host:
    - /bollettini/  cambia ogni giorno e non va MAI dalla cache
-   - /zone/        è statica e si può cachare tranquillamente */
+   - /zone/        è statica e si può cachare tranquillamente
+   Stessa logica per le ondate di calore: il file _latest cambia ogni
+   giorno, l'anagrafica delle 27 città no. */
 function isBollettino(url) {
-  return url.hostname === 'raw.githubusercontent.com' && url.pathname.includes('/bollettini/');
+  return url.hostname === 'raw.githubusercontent.com' &&
+    (url.pathname.includes('/bollettini/') || url.pathname.includes('ondate-calore_latest'));
 }
 function isTabellaZone(url) {
-  return url.hostname === 'raw.githubusercontent.com' && url.pathname.includes('/zone/');
+  return url.hostname === 'raw.githubusercontent.com' &&
+    (url.pathname.includes('/zone/') || url.pathname.includes('citta-anagrafica'));
 }
 
 self.addEventListener('install', (event) => {

@@ -366,6 +366,14 @@
     .badge-orange { background: var(--dpc-arancione); color: #000; }
     .badge-red    { background: var(--dpc-rosso);     color: #fff; }
     .alert-card .alert-detail { margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; }
+    /* Comune fuori dalle 27 citta' del sistema nazionale: nessun colore di
+       allerta, nessun badge. Il dato della citta' di riferimento e' contesto,
+       non un'allerta per il comune scelto, e non deve sembrarlo. */
+    .alert-neutral {
+      background: rgba(148,163,184,0.08);
+      border-color: var(--text-muted);
+    }
+    .alert-neutral .alert-title { font-weight: 600; color: var(--text-muted); }
     .hail-indicator { text-align: center; padding: 1.5rem; }
     .hail-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
     .hail-status { font-size: 1.3rem; font-weight: 700; margin-bottom: 0.3rem; }
@@ -620,6 +628,14 @@
   </div>
 
   <div class="section">
+    <div class="section-title">🌡️ Ondate di calore (Ministero della Salute)</div>
+    <div class="alert-cards" id="heat-box">
+      <div class="card" style="text-align:center; padding:2rem; color:var(--text-muted)">Caricamento bollettino…</div>
+    </div>
+    <p class="source-note" id="heat-source"></p>
+  </div>
+
+  <div class="section">
     <div class="section-title">🧊 Rischio grandine (stima non ufficiale)</div>
     <div class="card" id="hail-card">
       <div class="hail-indicator">
@@ -636,6 +652,7 @@
       <span>Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a></span>
       <span>Mappa: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
       <span>Allerte: Bollettino di criticità del <a href="https://github.com/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica" target="_blank" rel="noopener">Dipartimento della Protezione Civile</a>, in CSV via <a href="https://github.com/opendatasicilia/DPC-bollettini-criticita-idrogeologica-idraulica" target="_blank" rel="noopener">OpenDataSicilia</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)</span>
+      <span>Ondate di calore: <a href="https://www.salute.gov.it/new/it/tema/ondate-di-calore/" target="_blank" rel="noopener">Ministero della Salute</a>, in CSV via <a href="https://github.com/ondata/ondate-calore" target="_blank" rel="noopener">onData</a></span>
       <span id="app-version"></span>
     </div>
     <p class="disclaimer">
@@ -1660,7 +1677,168 @@ const COLORI = {
   4: { nome: 'rosso',     css: 'var(--dpc-rosso)' }
 };
 
-/* TRAFFIC LIGHT — basato sul solo rischio temporali del bollettino */
+/* ============================================================
+   ONDATE DI CALORE — Ministero della Salute
+   Il bollettino DPC copre solo dissesto, piene e temporali: il caldo
+   non c'e'. Il sistema nazionale di allarme e' del Ministero della
+   Salute, che pubblica pero' solo HTML e PDF. onData ne estrae ogni
+   giorno un CSV, sullo stesso host da cui gia' scarichiamo le zone.
+
+   ATTENZIONE: copre 27 citta', non 7.904 comuni. Il livello e'
+   calcolato sulla stazione aeroportuale e sulla popolazione di quella
+   citta': attribuirlo a un comune vicino sarebbe inventare un dato.
+   Per i comuni non coperti mostriamo la citta' di riferimento senza
+   colori ne' badge, dichiarando la distanza.
+   ============================================================ */
+const CALORE_BASE = 'https://raw.githubusercontent.com/ondata/ondate-calore/main/data';
+const CALORE_DATI = CALORE_BASE + '/ondate-calore_latest.csv';
+const CALORE_CITTA = CALORE_BASE + '/citta-anagrafica.csv';
+
+/* 4 righe stabili da anni: le teniamo qui per risparmiare una richiesta */
+const CALORE_LIVELLI = {
+  Livello0: { n: 0, etichetta: 'Livello 0', classe: 'green',  badge: 'badge-green',
+    des: 'Condizioni meteorologiche che non comportano rischi per la salute della popolazione.' },
+  Livello1: { n: 1, etichetta: 'Livello 1', classe: 'yellow', badge: 'badge-yellow',
+    des: 'Pre-allerta: condizioni che possono precedere il verificarsi di un\'ondata di calore.' },
+  Livello2: { n: 2, etichetta: 'Livello 2', classe: 'orange', badge: 'badge-orange',
+    des: 'Temperature elevate con possibili effetti negativi sulla salute, soprattutto nei soggetti fragili.' },
+  Livello3: { n: 3, etichetta: 'Livello 3', classe: 'red',    badge: 'badge-red',
+    des: 'Ondata di calore: condizioni ad elevato rischio che persistono per 3 o più giorni consecutivi.' }
+};
+
+let calorePromise = null;
+function caricaCalore() {
+  if (!calorePromise) {
+    calorePromise = Promise.all([
+      fetch(CALORE_DATI,  { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('calore ' + r.status); return r.text(); }),
+      fetch(CALORE_CITTA).then(r => { if (!r.ok) throw new Error('citta ' + r.status); return r.text(); })
+    ]).then(([dati, citta]) => ({ dati: parseCsv(dati), citta: parseCsv(citta) }))
+      .catch(e => { calorePromise = null; throw e; });
+  }
+  return calorePromise;
+}
+
+function distanzaKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, p = Math.PI / 180;
+  const dLat = (lat2 - lat1) * p, dLon = (lon2 - lon1) * p;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * p) * Math.cos(lat2 * p) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+async function loadHeat() {
+  const box = document.getElementById('heat-box');
+  const nota = document.getElementById('heat-source');
+  const token = placeToken;
+  if (!box) return;
+  box.innerHTML = '<div class="card" style="text-align:center;padding:2rem;color:var(--text-muted)">Caricamento bollettino…</div>';
+  if (nota) nota.textContent = '';
+
+  let calore, righeZone;
+  try {
+    [calore, righeZone] = await Promise.all([caricaCalore(), caricaZoneComuni()]);
+  } catch (e) {
+    if (token !== placeToken) return;
+    box.innerHTML = '<div class="error-msg">Bollettino ondate di calore non raggiungibile.</div>';
+    return;
+  }
+  if (token !== placeToken) return;
+
+  const oggi = giornoRoma(new Date());
+  const perOggi = calore.dati.filter(r => r.data === oggi);
+  if (!perOggi.length) {
+    // il sistema e' attivo da fine maggio a meta' settembre, e i bollettini
+    // escono da lunedi' a venerdi': fuori da quella finestra il file resta
+    // fermo. Meglio dirlo che mostrare il livello di un altro giorno.
+    box.innerHTML = '<div class="card" style="padding:1rem;color:var(--text-muted)">' +
+      'Nessun bollettino per oggi. Il sistema nazionale è attivo da fine maggio a metà settembre, ' +
+      'con pubblicazione dal lunedì al venerdì.</div>';
+    return;
+  }
+
+  const zc = trovaZona(
+    righeZone,
+    (state.slugTries && state.slugTries.length) ? state.slugTries : slugCandidates(state.comune),
+    state.provincia,
+    state.regione
+  );
+  const istat = zc && zc.pro_com_t ? zc.pro_com_t : null;
+  const anagrafe = calore.citta;
+  const mia = istat ? anagrafe.find(c => c.admin3code === istat) : null;
+
+  if (mia) {
+    const riga = perOggi.find(r => r.citta === mia.citta);
+    if (riga) { renderHeatUfficiale(mia, riga, calore.dati); return; }
+  }
+  renderHeatRiferimento(anagrafe, perOggi);
+}
+
+function renderHeatUfficiale(citta, riga, tutte) {
+  const box = document.getElementById('heat-box');
+  const liv = CALORE_LIVELLI[riga.livello] || CALORE_LIVELLI.Livello0;
+  const prossimi = tutte
+    .filter(r => r.citta === citta.citta && r.data > riga.data)
+    .sort((a, b) => a.data < b.data ? -1 : 1);
+
+  let html = '<div class="alert-card alert-' + liv.classe + '">' +
+    '<div class="alert-title"><span>' + esc(citta.name) + ' · oggi</span>' +
+    '<span class="alert-badge ' + liv.badge + '">' + esc(liv.etichetta) + '</span></div>' +
+    '<div class="alert-detail">' + esc(liv.des) + '</div></div>';
+
+  prossimi.forEach(r => {
+    const l = CALORE_LIVELLI[r.livello] || CALORE_LIVELLI.Livello0;
+    html += '<div class="alert-card alert-' + l.classe + '">' +
+      '<div class="alert-title"><span>' + esc(dataBreve(new Date(r.data + 'T12:00:00'))) + '</span>' +
+      '<span class="alert-badge ' + l.badge + '">' + esc(l.etichetta) + '</span></div>' +
+      '<div class="alert-detail">' + esc(l.des) + '</div></div>';
+  });
+
+  box.innerHTML = html;
+  const nota = document.getElementById('heat-source');
+  if (nota) {
+    nota.innerHTML = 'Sistema nazionale di prevenzione degli effetti del caldo sulla salute, ' +
+      'Ministero della Salute. ' +
+      (riga.URL ? '<a href="' + esc(riga.URL) + '" target="_blank" rel="noopener">Bollettino di ' +
+        esc(citta.name) + ' in PDF</a>.' : '');
+  }
+}
+
+function renderHeatRiferimento(anagrafe, perOggi) {
+  const box = document.getElementById('heat-box');
+  const nota = document.getElementById('heat-source');
+  const attive = anagrafe
+    .filter(c => perOggi.some(r => r.citta === c.citta))
+    .map(c => ({
+      c: c,
+      km: distanzaKm(state.lat, state.lon, parseFloat(c.latitude), parseFloat(c.longitude))
+    }))
+    .sort((a, b) => a.km - b.km);
+
+  if (!isFinite(state.lat) || !attive.length) {
+    box.innerHTML = '<div class="card" style="padding:1rem;color:var(--text-muted)">' +
+      esc(state.comune) + ' non rientra nelle 27 città del sistema nazionale sulle ondate di calore.</div>';
+    if (nota) nota.textContent = '';
+    return;
+  }
+
+  const vicina = attive[0];
+  const riga = perOggi.find(r => r.citta === vicina.c.citta);
+  const liv = CALORE_LIVELLI[riga.livello] || CALORE_LIVELLI.Livello0;
+
+  // nessuna classe colorata e nessun badge: non e' un'allerta per questo comune
+  box.innerHTML = '<div class="alert-card alert-neutral">' +
+    '<div class="alert-title"><span>Comune non coperto</span></div>' +
+    '<div class="alert-detail"><strong>' + esc(state.comune) + '</strong> non rientra nelle 27 città ' +
+    'monitorate dal Ministero della Salute, quindi non esiste un livello ufficiale per questo comune.' +
+    '<br><br>La città monitorata più vicina è <strong>' + esc(vicina.c.name) + '</strong>, a circa ' +
+    Math.round(vicina.km) + ' km: oggi è in ' + esc(liv.etichetta) + '. ' +
+    'È un dato riferito a ' + esc(vicina.c.name) + ', non a ' + esc(state.comune) + '.</div></div>';
+
+  if (nota) {
+    nota.textContent = 'Il livello è calcolato sulla stazione meteo e sulla popolazione della singola ' +
+      'città monitorata, perciò non è trasferibile ai comuni vicini.';
+  }
+}
 function updateTrafficLight(data) {
   const oggi = data.oggi;
   if (!oggi) { resetTrafficLight('Nessun bollettino valido per adesso'); return; }
@@ -1769,7 +1947,7 @@ let lastLoad = 0;
 async function runLoad() {
   document.getElementById('conn-status').textContent = '🟡 Aggiornamento…';
   try {
-    await Promise.all([loadWeather(), loadAlerts()]);
+    await Promise.all([loadWeather(), loadAlerts(), loadHeat()]);
     await initRadar();
   } finally {
     lastLoad = Date.now();
