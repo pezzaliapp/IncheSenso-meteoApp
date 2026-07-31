@@ -674,19 +674,30 @@ function slugify(name) {
     .replace(/^-+|-+$/g, '');
 }
 
+/* Open-Meteo restituisce admin3 nella forma amministrativa completa
+   ("Comune di Parma", "Città di Fidenza"): l'anagrafe ISTAT usa il nome nudo. */
+function nomeComune(v) {
+  return (v || '')
+    .replace(/^\s*(?:comune|citt[àa]|municipio)\s+d(?:i|ella|el|ello|egli|elle|e)?\s+/i, '')
+    .replace(/^\s*(?:comune|citt[àa])\s+d['\u2019]\s*/i, '')
+    .trim();
+}
+
 /* Più tentativi: i nomi restituiti dal geocoder non sempre coincidono
    con quelli dell'anagrafe ISTAT (es. "Roma Capitale", "Forlì (FC)"). */
 function slugCandidates(name) {
   const raw = (name || '').trim();
-  const variants = [
-    raw,
-    raw.replace(/\s*\(.*?\)\s*/g, ' '),                        // via "(FC)"
-    raw.replace(/^(comune di|citt[àa] di|municipio di)\s+/i, ''),
-    raw.replace(/\s+capitale$/i, ''),
-    raw.split('/')[0],                                          // "Bolzano/Bozen" -> "Bolzano"
-    raw.replace(/['\u2019]/g, '-')                              // "Sant'Angelo" -> "sant-angelo"
-  ];
-  return [...new Set(variants.map(slugify).filter(Boolean))];
+  if (!raw) return [];
+  const out = [];
+  [raw, nomeComune(raw)].forEach(b => {
+    if (!b) return;
+    out.push(b);
+    out.push(b.replace(/\s*\(.*?\)\s*/g, ' '));                 // via "(FC)"
+    out.push(b.replace(/\s+capitale$/i, ''));                   // "Roma Capitale" -> "Roma"
+    out.push(b.split('/')[0]);                                  // "Bolzano/Bozen" -> "Bolzano"
+    out.push(b.replace(/['\u2019]/g, '-'));                     // "Sant'Angelo" -> "sant-angelo"
+  });
+  return [...new Set(out.map(slugify).filter(Boolean))];
 }
 
 const WMO = {
@@ -909,16 +920,18 @@ function applyPlace(place, save) {
   // non devono più dipingere nulla, e i dati vecchi vanno buttati subito
   placeToken++;
   state.alerts = null;
-  state.comune    = place.comune || DEFAULT_PLACE.comune;
-  state.provincia = place.provincia || '';
+  state.comune    = nomeComune(place.comune) || place.comune || DEFAULT_PLACE.comune;
+  state.provincia = cleanProvincia(place.provincia || '');
   state.regione   = place.regione || '';
   state.lat       = place.lat;
   state.lon       = place.lon;
   state.slug      = slugify(state.comune);
-  state.slugTries = slugCandidates(state.comune).concat(
-    place.altName ? slugCandidates(place.altName) : []
-  );
-  state.slugTries = [...new Set(state.slugTries)];
+  // l'ordine conta: prima il nome del comune, poi eventuali alias del geocoder
+  state.slugTries = [...new Set(
+    slugCandidates(place.comune)
+      .concat(slugCandidates(state.comune))
+      .concat(place.altName ? slugCandidates(place.altName) : [])
+  )];
   renderPlaceLabel();
   if (save !== false) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(place)); } catch (e) {}
@@ -975,7 +988,7 @@ cityInput.addEventListener('input', () => {
           const r = results[+btn.dataset.i];
           cityInput.value = '';
           setPlace({
-            comune:    r.admin3 || r.name,
+            comune:    nomeComune(r.admin3) || r.name,
             altName:   r.name,
             provincia: cleanProvincia(r.admin2),
             regione:   r.admin1 || '',
@@ -1318,16 +1331,89 @@ function caricaZoneComuni() {
   return zonePromise;
 }
 
-function trovaZona(righe, comune, provincia) {
-  const c = slugify(comune), p = slugify(provincia || '');
-  const perNome = righe.filter(r => slugify(r.comune_nome) === c);
-  if (!perNome.length) return null;
-  if (perNome.length === 1) return perNome[0];
-  const conProvincia = perNome.filter(r => {
-    const rp = slugify(r.provincia_nome);
-    return p && (rp === p || rp.includes(p) || p.includes(rp));
+/* Il registro nazionale DPC (e quindi il CSV) inverte i nomi di Emil-G1 ed
+   Emil-G2 rispetto alla Regione Emilia-Romagna, che per il proprio territorio
+   è la fonte autoritativa. I comuni assegnati ai due codici sono corretti
+   (Emil-G1 = quota media 627 m, Emil-G2 = 386 m): sbagliate sono solo le
+   etichette. Qui rimettiamo i nomi ufficiali regionali.
+   Rif. protezionecivile.regione.emilia-romagna.it/le-zone-di-allertamento */
+const NOMI_ZONA_CORRETTI = {
+  'Emil-G1': 'Montagna piacentino-parmense',
+  'Emil-G2': 'Alta collina piacentino-parmense'
+};
+function nomeZona(zc) {
+  return NOMI_ZONA_CORRETTI[zc.zona_codice] || zc.zona_nome || '';
+}
+
+/* Indice comune-slug -> righe, costruito una sola volta: 7.904 comuni
+   filtrati per ogni tentativo erano il collo di bottiglia. */
+let zoneIndex = null;
+function indicizzaZone(righe) {
+  if (zoneIndex && zoneIndex.righe === righe) return zoneIndex;
+  const perComune = new Map(), perProvincia = new Map();
+  righe.forEach(r => {
+    const c = slugify(r.comune_nome);
+    if (!perComune.has(c)) perComune.set(c, []);
+    perComune.get(c).push(r);
+    const p = slugify(r.provincia_nome);
+    if (!perProvincia.has(p)) perProvincia.set(p, []);
+    perProvincia.get(p).push(r);
   });
-  return conProvincia.length === 1 ? conProvincia[0] : (conProvincia[0] || null);
+  zoneIndex = { righe: righe, perComune: perComune, perProvincia: perProvincia };
+  return zoneIndex;
+}
+
+/* Prova tutti i nomi candidati (il geocoder dice "Comune di Parma",
+   l'ISTAT dice "Parma") e disambigua con provincia e regione. */
+function trovaZona(righe, candidati, provincia, regione) {
+  const idx = indicizzaZone(righe);
+  const cands = Array.isArray(candidati) ? candidati : slugCandidates(candidati);
+  const p  = slugify(nomeComune(cleanProvincia(provincia || '')));
+  const rg = slugify(regione || '');
+
+  const perRegione = arr => {
+    if (!rg) return [];
+    return arr.filter(r => {
+      const s = slugify(r.regione_nome);
+      return s === rg || s.includes(rg) || rg.includes(s);
+    });
+  };
+
+  for (const c of cands) {
+    const hit = idx.perComune.get(c);
+    if (!hit || !hit.length) continue;
+    if (hit.length === 1) {
+      // un solo omonimo in Italia, ma se sappiamo la regione e non combacia
+      // è quasi certo un falso positivo (una frazione che si chiama come un
+      // comune dall'altra parte del Paese): meglio scartarlo
+      if (rg && !perRegione(hit).length) continue;
+      return hit[0];
+    }
+    const conProvincia = p ? hit.filter(r => {
+      const rp = slugify(r.provincia_nome);
+      return rp === p || rp.includes(p) || p.includes(rp);
+    }) : [];
+    if (conProvincia.length) return conProvincia[0];
+    const conRegione = perRegione(hit);
+    if (conRegione.length) return conRegione[0];
+    // omonimi non risolti: se avevamo provincia o regione e nessuna combacia,
+    // meglio dire "non trovato" che mostrare l'allerta di un'altra zona d'Italia
+    if (!p && !rg) return hit[0];
+  }
+
+  /* Ripiego: il geocoder può restituire una frazione che non è un comune
+     (es. "Cinquale"). Se tutta la provincia sta in un'unica zona di
+     allerta, quella zona è comunque la risposta giusta. */
+  if (p) {
+    const inProv = idx.perProvincia.get(p) ||
+      [...idx.perProvincia.entries()].filter(([k]) => k.includes(p) || p.includes(k)).flatMap(([, v]) => v);
+    if (inProv && inProv.length) {
+      const validi = inProv.filter(r => r.zona_codice && r.zona_codice.trim());
+      const zone = [...new Set(validi.map(r => r.zona_codice))];
+      if (zone.length === 1) return Object.assign({}, validi[0], { approssimato: 'provincia' });
+    }
+  }
+  return null;
 }
 
 /* --- classificazione temporale: è il nocciolo del fix ---
@@ -1411,11 +1497,31 @@ async function loadAlerts() {
   }
   if (token !== placeToken) return;
 
-  const zc = trovaZona(righeZone, comuneRichiesto, state.provincia);
+  const zc = trovaZona(
+    righeZone,
+    (state.slugTries && state.slugTries.length) ? state.slugTries : slugCandidates(comuneRichiesto),
+    state.provincia,
+    state.regione
+  );
   if (!zc) {
     box.innerHTML = '<div class="error-msg">Non trovo <strong>' + esc(comuneRichiesto) +
-      '</strong> nell\'elenco dei comuni della Protezione Civile. Prova a cercarlo con il nome completo.</div>';
+      '</strong> nell\'elenco dei 7.904 comuni della Protezione Civile. ' +
+      'Se hai cercato una frazione, prova con il nome del comune di appartenenza.</div>';
     state.alerts = null;
+    updateHailRisk();
+    return;
+  }
+  if (!zc.zona_codice || !zc.zona_codice.trim()) {
+    // 12 comuni su 7.904 (fra cui Siracusa e Montegridolfo) sono in anagrafe
+    // ma senza zona di allerta assegnata: senza codice non c'è riga nel
+    // bollettino, e fingere "nessuna allerta" sarebbe un falso rassicurante
+    box.innerHTML = '<div class="error-msg"><strong>' + esc(zc.comune_nome) +
+      '</strong> risulta nell\'anagrafe della Protezione Civile ma senza zona di allerta ' +
+      'assegnata, quindi il bollettino non lo copre. Consulta il sito di allertamento ' +
+      'della tua regione.</div>';
+    state.alerts = null;
+    document.getElementById('alerts-source').textContent = '';
+    document.getElementById('diagnostica').innerHTML = '';
     updateHailRisk();
     return;
   }
@@ -1433,8 +1539,9 @@ async function loadAlerts() {
 
   state.alerts = {
     comune: zc.comune_nome, provincia: zc.provincia_nome, regione: zc.regione_nome,
-    zona: zc.zona_nome && zc.zona_nome !== zc.zona_codice
-            ? zc.zona_nome + ' (' + zc.zona_codice + ')' : zc.zona_codice,
+    approssimato: zc.approssimato || null,
+    zona: nomeZona(zc) && nomeZona(zc) !== zc.zona_codice
+            ? nomeZona(zc) + ' (' + zc.zona_codice + ')' : zc.zona_codice,
     pubblicato: record.length ? record[0].pubblicato : null,
     oggi: corrente, futuri: futuri, scaduti: scaduti
   };
@@ -1500,6 +1607,10 @@ function renderSource(a) {
         month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(a.pubblicato)
     : null;
   el.innerHTML =
+    (a.approssimato === 'provincia'
+      ? 'Comune non presente in anagrafe: mostro la zona di allerta della provincia di ' +
+        esc(a.provincia) + ', che è unica per tutto il territorio provinciale. '
+      : '') +
     (quando ? 'Bollettino di criticità pubblicato ' + esc(quando) + '. ' : '') +
     'Fonte: Dipartimento della Protezione Civile. Il bollettino esce ogni giorno entro le 16:00. ' +
     'Verifica su <a href="https://www.protezionecivile.gov.it" target="_blank" rel="noopener">protezionecivile.gov.it</a> ' +
