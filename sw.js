@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v18';
+const CACHE_NAME = 'meteo-it-v19';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -89,6 +89,20 @@ self.addEventListener('message', (event) => {
   if (data.type === 'GET_VERSION' && event.ports && event.ports[0]) {
     event.ports[0].postMessage({ version: CACHE_NAME });
   }
+});
+
+/* Tocco sulla notifica: riporto l'utente all'app gia' aperta invece di
+   aprirne una seconda copia. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((lista) => {
+      for (const client of lista) {
+        if (client.url.includes(BASE_PATH) && 'focus' in client) return client.focus();
+      }
+      if (clients.openWindow) return clients.openWindow(BASE_PATH);
+    })
+  );
 });
 
 function networkFirst(request) {

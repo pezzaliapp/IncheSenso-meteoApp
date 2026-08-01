@@ -797,6 +797,7 @@ if ('serviceWorker' in navigator) {
   });
 
   navigator.serviceWorker.register('sw.js').then(reg => {
+    swRegistration = reg;
     askAppVersion();
 
     // aggiornamento già pronto da una visita precedente
@@ -881,8 +882,13 @@ async function toggleNotifications() {
 
   if (perm === 'granted') {
     setNotifState(true);
-    showNotifNote('Ti avvisiamo quando il livello di allerta sale. Gli avvisi arrivano mentre l\'app è aperta.');
-    new Notification('IncheSenso Meteo', { body: 'Notifiche attivate per ' + state.comune });
+    showNotifNote('Ti avvisiamo quando il livello di allerta sale, ma solo mentre l\'app è aperta: ' +
+      'IncheSenso non riceve ancora notifiche push a schermo spento.');
+    const ok = await mostraNotifica('IncheSenso Meteo',
+      { body: 'Notifiche attivate per ' + state.comune, icon: 'icons/icon-192x192.svg' });
+    if (!ok) {
+      showNotifNote('Permesso concesso, ma questo dispositivo non è riuscito a mostrare la notifica di prova.', true);
+    }
   } else if (perm === 'denied') {
     showNotifNote('Notifiche bloccate. Riattivale dalle impostazioni del browser per questo sito.', true);
   } else {
@@ -904,10 +910,36 @@ if (NOTIF_SUPPORTED &&
   showNotifNote('Per ricevere le allerte anche a schermo spento, aggiungi l\'app alla schermata Home.');
 }
 
+/* Sui dispositivi mobili il costruttore `new Notification()` NON funziona:
+   Chrome su Android lancia "Illegal constructor" e iOS lo ignora. L'unica
+   via supportata e' registration.showNotification(). Su desktop funzionano
+   entrambi, quindi passiamo sempre dal service worker e teniamo il
+   costruttore solo come ultima spiaggia. */
+let swRegistration = null;
+
+async function mostraNotifica(titolo, opzioni) {
+  if (!NOTIF_SUPPORTED || Notification.permission !== 'granted') return false;
+  try {
+    const reg = swRegistration ||
+      (navigator.serviceWorker ? await navigator.serviceWorker.ready : null);
+    if (reg && reg.showNotification) {
+      await reg.showNotification(titolo, opzioni);
+      return true;
+    }
+  } catch (e) { /* si prova col costruttore */ }
+  try { new Notification(titolo, opzioni); return true; } catch (e) { return false; }
+}
+
 function sendAlertNotification(title, body) {
   if (!NOTIF_SUPPORTED) return;
   if (state.notifications && Notification.permission === 'granted') {
-    new Notification(title, { body: body, icon: 'icons/icon-192x192.svg' });
+    mostraNotifica(title, {
+      body: body,
+      icon: 'icons/icon-192x192.svg',
+      badge: 'icons/icon-96x96.svg',
+      tag: 'allerta-meteo',
+      renotify: true
+    });
   }
 }
 
