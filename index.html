@@ -1691,7 +1691,16 @@ const COLORI = {
    allertamento: il codice DPC 'Emil-H2' e' la zona regionale 'H2'.
    Passiamo dal worker di Allerta Certo, che fa gia' da proxy.
    ============================================================ */
-const ER_ENDPOINT = 'https://allerta-certo-notifiche-test.pezzalialessandro.workers.dev/api/allerta';
+/* Due strade, provate in ordine:
+   1. l'endpoint della Regione in diretta — se il portale manda i suoi
+      header CORS, non serve nessun proxy;
+   2. il worker di Allerta Certo, che fa da proxy (richiede che il worker
+      sia stato deployato con Access-Control-Allow-Origin).
+   Basta che UNA delle due risponda. */
+const ER_ENDPOINTS = [
+  'https://allertameteo.regione.emilia-romagna.it/o/get-stato-allerta',
+  'https://allerta-certo-notifiche-test.pezzalialessandro.workers.dev/api/allerta'
+];
 const ER_FENOMENI = {
   temperature_estreme:   { et: 'Temperature estreme', icona: '🌡️' },
   idraulica:             { et: 'Criticità idraulica', icona: '🌊' },
@@ -1718,11 +1727,28 @@ function caricaER() {
   // la Regione aggiorna di rado: una richiesta ogni 10 minuti basta
   if (!erPromise || Date.now() - erPromiseTs > 600000) {
     erPromiseTs = Date.now();
-    erPromise = fetch(ER_ENDPOINT, { cache: 'no-store' })
-      .then(r => { if (!r.ok) throw new Error('ER ' + r.status); return r.json(); })
-      .catch(e => { erPromise = null; throw e; });
+    erPromise = (async () => {
+      const errori = [];
+      for (const url of ER_ENDPOINTS) {
+        try {
+          const r = await fetch(url, { cache: 'no-store' });
+          if (!r.ok) { errori.push(etichettaHost(url) + ' HTTP ' + r.status); continue; }
+          const j = await r.json();
+          if (j && typeof j === 'object') return j;
+          errori.push(etichettaHost(url) + ' risposta non valida');
+        } catch (e) {
+          errori.push(etichettaHost(url) + ' ' + ((e && e.message) || 'errore di rete'));
+        }
+      }
+      throw new Error(errori.join(' · '));
+    })().catch(e => { erPromise = null; throw e; });
   }
   return erPromise;
+}
+
+function etichettaHost(url) {
+  try { return new URL(url).hostname.split('.').slice(0, 2).join('.'); }
+  catch (e) { return 'fonte'; }
 }
 
 /* 'Emil-H2' -> 'H2'. E' l'unico ponte necessario fra i due sistemi. */

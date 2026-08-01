@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v17';
+const CACHE_NAME = 'meteo-it-v18';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -35,7 +35,8 @@ const LIVE_HOSTS = [
 const NEVER_CACHE_HOSTS = [
   'nominatim.openstreetmap.org',
   'api.bigdatacloud.net',
-  'workers.dev'
+  'workers.dev',
+  'allertameteo.regione.emilia-romagna.it'
 ];
 
 /* I bollettini stanno su raw.githubusercontent.com insieme alla tabella
