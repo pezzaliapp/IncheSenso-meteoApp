@@ -568,6 +568,7 @@
       <span>🔔 Notifiche allerte</span>
       <div class="toggle" id="notif-toggle" role="switch" aria-checked="false" tabindex="0" aria-label="Attiva le notifiche di allerta"></div>
     </div>
+    <button id="notif-test" hidden style="margin-top:0.6rem; font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:8px; border:1px solid var(--text-muted); background:transparent; color:var(--text-muted); cursor:pointer">Invia lo stato attuale come notifica</button>
     <p class="notif-note" id="notif-note" hidden></p>
   </div>
 
@@ -857,7 +858,50 @@ function setNotifState(on) {
   state.notifications = on;
   notifToggle.classList.toggle('on', on);
   notifToggle.setAttribute('aria-checked', on ? 'true' : 'false');
+  const test = document.getElementById('notif-test');
+  if (test) test.hidden = !on;
   try { localStorage.setItem('meteo-it-notif', on ? '1' : '0'); } catch (e) {}
+}
+
+/* Riepilogo di quello che e' attivo ADESSO, dalle due fonti.
+   Serve sia alla notifica di attivazione sia al pulsante di prova:
+   la logica normale avvisa solo sui peggioramenti, quindi se un'allerta
+   era gia' gialla quando accendi il toggle non scatterebbe mai nulla. */
+function riepilogoAllerte() {
+  const parti = [];
+
+  if (ultimoER && !ultimoER.errore && ultimoER.dati) {
+    const attivi = Object.keys(ER_FENOMENI)
+      .filter(k => { const v = ultimoER.dati[k]; return v && v !== 'green' && ER_COLORI[v]; })
+      .map(k => ER_FENOMENI[k].et.toLowerCase() + ' ' + ER_COLORI[ultimoER.dati[k]].et.toLowerCase());
+    parti.push(attivi.length
+      ? 'Regione E-R, zona ' + ultimoER.zona + ': ' + attivi.join(', ') + '.'
+      : 'Regione E-R, zona ' + ultimoER.zona + ': nessuna allerta.');
+  }
+
+  const a = state.alerts;
+  if (a && a.oggi && a.oggi.livello > 1) {
+    parti.push('Bollettino DPC: livello ' + COLORI[a.oggi.livello].nome + '.');
+  } else if (a) {
+    parti.push('Bollettino DPC: nessuna criticità.');
+  }
+
+  return parti.length ? parti.join(' ') : 'Nessun dato di allerta caricato.';
+}
+
+async function inviaStatoAttuale() {
+  const ok = await mostraNotifica('IncheSenso Meteo · ' + state.comune, {
+    body: riepilogoAllerte(),
+    icon: 'icons/icon-192x192.svg',
+    badge: 'icons/icon-96x96.svg',
+    tag: 'stato-attuale',
+    renotify: true
+  });
+  if (!ok) {
+    showNotifNote('Non è stato possibile mostrare la notifica su questo dispositivo. ' +
+      'Controlla che le notifiche siano permesse nelle impostazioni di sistema per questa app.', true);
+  }
+  return ok;
 }
 
 async function toggleNotifications() {
@@ -884,11 +928,7 @@ async function toggleNotifications() {
     setNotifState(true);
     showNotifNote('Ti avvisiamo quando il livello di allerta sale, ma solo mentre l\'app è aperta: ' +
       'IncheSenso non riceve ancora notifiche push a schermo spento.');
-    const ok = await mostraNotifica('IncheSenso Meteo',
-      { body: 'Notifiche attivate per ' + state.comune, icon: 'icons/icon-192x192.svg' });
-    if (!ok) {
-      showNotifNote('Permesso concesso, ma questo dispositivo non è riuscito a mostrare la notifica di prova.', true);
-    }
+    await inviaStatoAttuale();
   } else if (perm === 'denied') {
     showNotifNote('Notifiche bloccate. Riattivale dalle impostazioni del browser per questo sito.', true);
   } else {
@@ -897,6 +937,10 @@ async function toggleNotifications() {
 }
 
 notifToggle.addEventListener('click', toggleNotifications);
+(function () {
+  const test = document.getElementById('notif-test');
+  if (test) test.addEventListener('click', inviaStatoAttuale);
+})();
 notifToggle.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNotifications(); }
 });
@@ -1896,6 +1940,7 @@ async function loadHeat() {
   try { er = await statoER(zc); } catch (e) { er = { zona: '?', errore: String(e && e.message || e) }; }
   if (token !== placeToken) return;
   renderAltreRegionali(er, zc);
+  ultimoER = er;
   controllaNotificaER(er);
   if (er && !er.errore && ER_COLORI[er.dati.temperature_estreme]) {
     renderHeatRegionale(er, zc);
@@ -1935,6 +1980,7 @@ async function loadHeat() {
 }
 
 const ER_ORDINE = { green: 0, yellow: 1, orange: 2, red: 3 };
+let ultimoER = null;
 
 /* La notifica sorvegliava solo il livello DPC, che per il calore e' sempre
    verde: un'allerta gialla per temperature estreme non avrebbe mai fatto
