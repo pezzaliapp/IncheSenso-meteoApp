@@ -1463,6 +1463,20 @@ function indicizzaZone(righe) {
   return zoneIndex;
 }
 
+/* Se tutta la provincia ricade in una sola zona di allerta, quella zona
+   vale con certezza anche per un comune la cui riga e' incompleta.
+   Non e' una stima: e' l'unica possibilita'. */
+function zonaUnicaProvincia(idx, provincia) {
+  const p = slugify(provincia || '');
+  if (!p) return null;
+  const righe = idx.perProvincia.get(p);
+  if (!righe || !righe.length) return null;
+  const validi = righe.filter(r => r.zona_codice && r.zona_codice.trim());
+  if (!validi.length) return null;
+  const zone = [...new Set(validi.map(r => r.zona_codice))];
+  return zone.length === 1 ? validi[0] : null;
+}
+
 /* Prova tutti i nomi candidati (il geocoder dice "Comune di Parma",
    l'ISTAT dice "Parma") e disambigua con provincia e regione. */
 function trovaZona(righe, candidati, provincia, regione) {
@@ -1482,23 +1496,35 @@ function trovaZona(righe, candidati, provincia, regione) {
   for (const c of cands) {
     const hit = idx.perComune.get(c);
     if (!hit || !hit.length) continue;
-    if (hit.length === 1) {
-      // un solo omonimo in Italia, ma se sappiamo la regione e non combacia
-      // è quasi certo un falso positivo (una frazione che si chiama come un
-      // comune dall'altra parte del Paese): meglio scartarlo
-      if (rg && !perRegione(hit).length) continue;
-      return hit[0];
+    /* alcune righe dell'anagrafe non hanno zona assegnata: se la provincia
+       ne ha una sola, quella e' la risposta certa (non una stima), quindi
+       preferiamo la riga completa a quella vuota */
+    const pieni = hit.filter(r => r.zona_codice && r.zona_codice.trim());
+    const usabili = pieni.length ? pieni : hit;
+    if (usabili.length === 1) {
+      const solo = usabili[0];
+      if (rg && !perRegione(usabili).length) continue;
+      if (!solo.zona_codice || !solo.zona_codice.trim()) {
+        const recuperata = zonaUnicaProvincia(idx, solo.provincia_nome);
+        if (recuperata) {
+          return Object.assign({}, solo, {
+            zona_codice: recuperata.zona_codice,
+            zona_nome: recuperata.zona_nome,
+            approssimato: 'provincia'
+          });
+        }
+      }
+      return solo;
     }
-    const conProvincia = p ? hit.filter(r => {
+    const hitUtili = usabili;
+    const conProvincia = p ? hitUtili.filter(r => {
       const rp = slugify(r.provincia_nome);
       return rp === p || rp.includes(p) || p.includes(rp);
     }) : [];
     if (conProvincia.length) return conProvincia[0];
-    const conRegione = perRegione(hit);
+    const conRegione = perRegione(hitUtili);
     if (conRegione.length) return conRegione[0];
-    // omonimi non risolti: se avevamo provincia o regione e nessuna combacia,
-    // meglio dire "non trovato" che mostrare l'allerta di un'altra zona d'Italia
-    if (!p && !rg) return hit[0];
+    if (!p && !rg) return hitUtili[0];
   }
 
   /* Ripiego: il geocoder può restituire una frazione che non è un comune
