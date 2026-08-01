@@ -1740,14 +1740,26 @@ function formattaValiditaER(v) {
   }).format(d);
 }
 
-/* Restituisce {zona, dati, validoFino} oppure null se non applicabile */
+/* Restituisce:
+   - null           se il comune non e' in Emilia-Romagna (non applicabile)
+   - {zona, errore} se e' in E-R ma il dato non arriva: va DETTO, non nascosto
+   - {zona, dati, validoFino} in caso di successo */
 async function statoER(zc) {
   const zona = zc ? zonaRegionaleER(zc.zona_codice) : null;
   if (!zona) return null;
-  const payload = await caricaER();
-  const dati = payload && payload[zona];
-  if (!dati || typeof dati !== 'object') return null;
-  return { zona: zona, dati: dati, validoFino: payload.dataFine || '' };
+  try {
+    const payload = await caricaER();
+    const dati = payload && payload[zona];
+    if (!dati || typeof dati !== 'object') {
+      const chiavi = payload ? Object.keys(payload).slice(0, 6).join(', ') : '—';
+      return { zona: zona, errore: 'La risposta del servizio non contiene la zona ' + zona +
+        '. Chiavi ricevute: ' + chiavi + '.' };
+    }
+    return { zona: zona, dati: dati, validoFino: payload.dataFine || '' };
+  } catch (e) {
+    return { zona: zona, errore: 'Servizio non raggiungibile: ' +
+      ((e && e.message) ? e.message : 'errore di rete') + '.' };
+  }
 }
 /* ============================================================
    ONDATE DI CALORE — Ministero della Salute
@@ -1823,10 +1835,10 @@ async function loadHeat() {
      fuori dalla stagione ministeriale, perche' d'inverno le allerte
      regionali (neve, ghiaccio) sono proprio quelle che servono. */
   let er = null;
-  try { er = await statoER(zc); } catch (e) { er = null; }
+  try { er = await statoER(zc); } catch (e) { er = { zona: '?', errore: String(e && e.message || e) }; }
   if (token !== placeToken) return;
   renderAltreRegionali(er, zc);
-  if (er && ER_COLORI[er.dati.temperature_estreme]) {
+  if (er && !er.errore && ER_COLORI[er.dati.temperature_estreme]) {
     renderHeatRegionale(er, zc);
     return;
   }
@@ -1892,13 +1904,23 @@ function renderAltreRegionali(er, zc) {
 
   if (!er) { sez.hidden = true; return; }
 
+  sez.hidden = false;
+
+  if (er.errore) {
+    box.innerHTML = '<div class="error-msg">Allerte regionali non disponibili. ' +
+      esc(er.errore) + '</div>';
+    if (nota) {
+      nota.textContent = 'Zona ' + er.zona + '. Il dato nazionale DPC qui sopra resta valido.';
+    }
+    return;
+  }
+
   const altri = Object.keys(ER_FENOMENI)
     .filter(k => k !== 'temperature_estreme' && ER_GIA_IN_DPC.indexOf(k) === -1)
     .map(k => ({ k: k, col: ER_COLORI[er.dati[k]] }))
     .filter(x => x.col);
 
   const attivi = altri.filter(x => x.col.classe !== 'green');
-  sez.hidden = false;
 
   if (!attivi.length) {
     box.innerHTML = '<div class="alert-card alert-green">' +
