@@ -1896,6 +1896,7 @@ async function loadHeat() {
   try { er = await statoER(zc); } catch (e) { er = { zona: '?', errore: String(e && e.message || e) }; }
   if (token !== placeToken) return;
   renderAltreRegionali(er, zc);
+  controllaNotificaER(er);
   if (er && !er.errore && ER_COLORI[er.dati.temperature_estreme]) {
     renderHeatRegionale(er, zc);
     return;
@@ -1931,6 +1932,40 @@ async function loadHeat() {
     if (riga) { renderHeatUfficiale(mia, riga, calore.dati); return; }
   }
   renderHeatRiferimento(anagrafe, perOggi);
+}
+
+const ER_ORDINE = { green: 0, yellow: 1, orange: 2, red: 3 };
+
+/* La notifica sorvegliava solo il livello DPC, che per il calore e' sempre
+   verde: un'allerta gialla per temperature estreme non avrebbe mai fatto
+   scattare nulla. Qui guardiamo anche i nove fenomeni regionali. */
+function controllaNotificaER(er) {
+  if (!er || er.errore || !er.dati) return;
+
+  let max = 'green';
+  const attivi = [];
+  Object.keys(ER_FENOMENI).forEach(k => {
+    const v = er.dati[k];
+    if (!(v in ER_ORDINE)) return;
+    if (ER_ORDINE[v] > ER_ORDINE[max]) max = v;
+    if (v !== 'green') attivi.push(ER_FENOMENI[k].et.toLowerCase());
+  });
+
+  const chiave = 'meteo-it-last-er-' + er.zona;
+  let prec = null;
+  try { prec = localStorage.getItem(chiave); } catch (e) {}
+  const livPrec = (prec !== null && prec in ER_ORDINE) ? ER_ORDINE[prec] : null;
+
+  // primo giro: memorizzo e basta, altrimenti notificherei uno stato
+  // che l'utente non ha visto peggiorare
+  if (livPrec !== null && ER_ORDINE[max] > livPrec) {
+    sendAlertNotification(
+      '⚠️ Allerta ' + ER_COLORI[max].et + ' · ' + state.comune,
+      'Regione Emilia-Romagna, zona ' + er.zona +
+        (attivi.length ? ': ' + attivi.join(', ') + '.' : '.')
+    );
+  }
+  try { localStorage.setItem(chiave, max); } catch (e) {}
 }
 
 function renderHeatRegionale(er, zc) {
