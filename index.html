@@ -32,8 +32,11 @@
   <meta name="twitter:description" content="Radar dei temporali e bollettino DPC per tutti i comuni italiani, in base alla tua posizione. Gratuita, senza account.">
   <meta name="twitter:image" content="https://www.alessandropezzali.it/IncheSenso-meteoApp/og-image.png">
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icons/icon-192x192.svg">
+  <!-- iOS non supporta SVG come apple-touch-icon: serve un PNG, altrimenti
+       Safari ripiega su uno screenshot della pagina come icona. -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/svg+xml" href="icons/icon-72x72.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192x192.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <style>
     :root {
@@ -752,11 +755,12 @@ let state = {
 };
 
 /* ============================================================
-   SERVICE WORKER E AGGIORNAMENTI
+   SERVICE WORKER E AGGIORNAMENTI (AUTOMATICI)
    Quando pubblichi una nuova versione (basta cambiare CACHE_NAME in
-   sw.js) il nuovo worker si installa e resta in attesa. La pagina se ne
-   accorge e mostra la barra "Aggiorna": al tocco il worker prende il
-   controllo e la pagina si ricarica sulla versione nuova.
+   sw.js) il nuovo worker si installa, si attiva da solo e la pagina
+   si ricarica una volta: l'utente riceve l'aggiornamento senza fare
+   nulla, né disinstallare né toccare pulsanti. La barra "Aggiorna"
+   resta solo come piano B se il worker non risponde entro 5 secondi.
    ============================================================ */
 const updateBar = document.getElementById('update-bar');
 const updateBtn = document.getElementById('update-btn');
@@ -767,6 +771,16 @@ function showUpdateBar(worker) {
   waitingWorker = worker;
   updateBar.hidden = false;
   requestAnimationFrame(() => updateBar.classList.add('show'));
+}
+
+/* Aggiornamento AUTOMATICO: appena il worker nuovo è pronto gli dico di
+   attivarsi; 'controllerchange' ricarica la pagina una volta sola.
+   Se entro 5 secondi non è successo nulla (worker che non risponde),
+   mostro la vecchia barra "Aggiorna" come piano B. */
+function applyUpdate(worker) {
+  waitingWorker = worker;
+  worker.postMessage({ type: 'SKIP_WAITING' });
+  setTimeout(() => { if (!reloadingForUpdate) showUpdateBar(worker); }, 5000);
 }
 
 updateBtn.addEventListener('click', () => {
@@ -797,20 +811,20 @@ if ('serviceWorker' in navigator) {
     location.reload();
   });
 
-  navigator.serviceWorker.register('sw.js').then(reg => {
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
     swRegistration = reg;
     askAppVersion();
 
-    // aggiornamento già pronto da una visita precedente
-    if (reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
+    // aggiornamento già pronto da una visita precedente: applicalo subito
+    if (reg.waiting && navigator.serviceWorker.controller) applyUpdate(reg.waiting);
 
     reg.addEventListener('updatefound', () => {
       const incoming = reg.installing;
       if (!incoming) return;
       incoming.addEventListener('statechange', () => {
-        // se non c'è un controller è la primissima installazione: niente barra
+        // se non c'è un controller è la primissima installazione: niente reload
         if (incoming.state === 'installed' && navigator.serviceWorker.controller) {
-          showUpdateBar(incoming);
+          applyUpdate(incoming);
         }
       });
     });

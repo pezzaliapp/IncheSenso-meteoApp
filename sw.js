@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v22';
+const CACHE_NAME = 'meteo-it-v23';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -17,6 +17,11 @@ const STATIC_ASSETS = [
   `${BASE_PATH}icons/icon-192x192.svg`,
   `${BASE_PATH}icons/icon-384x384.svg`,
   `${BASE_PATH}icons/icon-512x512.svg`,
+  `${BASE_PATH}icons/icon-192x192.png`,
+  `${BASE_PATH}icons/icon-512x512.png`,
+  `${BASE_PATH}icons/maskable-192x192.png`,
+  `${BASE_PATH}icons/maskable-512x512.png`,
+  `${BASE_PATH}icons/apple-touch-icon.png`,
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 ];
@@ -55,6 +60,9 @@ function isTabellaZone(url) {
 }
 
 self.addEventListener('install', (event) => {
+  // Aggiornamento automatico: il worker nuovo non resta in attesa,
+  // si attiva appena installato. La pagina ricarica su 'controllerchange'.
+  self.skipWaiting();
   event.waitUntil(
     caches
       .open(CACHE_NAME)
