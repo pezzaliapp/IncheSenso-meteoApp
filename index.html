@@ -846,9 +846,35 @@ if ('serviceWorker' in navigator) {
     e.preventDefault();            // niente mini-infobar automatica
     if (isStandalone || snoozed) return;
     deferredPrompt = e;
+    // se il piano B era già a schermo, torno al pulsante a un tocco
+    bar.querySelector('p').textContent = '📲 Installa IncheSenso come app: schermo intero e vista corretta.';
+    btn.hidden = false;
     bar.hidden = false;
     requestAnimationFrame(() => bar.classList.add('show'));
   });
+
+  /* PIANO B — Samsung Internet e la modalità "Sito desktop" non emettono
+     beforeinstallprompt: senza questo blocco l'utente non vedrebbe nessun
+     messaggio. Dopo 3 secondi, se l'app gira nel browser e il prompt nativo
+     non è arrivato, mostriamo comunque il banner con le istruzioni giuste
+     per il caso rilevato. */
+  setTimeout(() => {
+    if (isStandalone || snoozed || deferredPrompt || !bar.hidden) return;
+    const testo = bar.querySelector('p');
+    const isSamsung = /SamsungBrowser/i.test(navigator.userAgent);
+    const vistaDesktop = navigator.maxTouchPoints > 0 && window.innerWidth >= 700;
+    if (vistaDesktop) {
+      testo.textContent = '⚠️ Vista rimpicciolita? Nel menu del browser togli la spunta a "Sito desktop", poi installa l\'app: menu → ' +
+        (isSamsung ? '"Aggiungi pagina a" → "Schermata Home" → Installa.' : '"Installa app".');
+    } else if (isSamsung) {
+      testo.textContent = '📲 Per l\'app a schermo intero: menu ≡ → "Aggiungi pagina a" → "Schermata Home" → Installa.';
+    } else {
+      testo.textContent = '📲 Per l\'app a schermo intero: menu del browser → "Installa app".';
+    }
+    btn.hidden = true;             // niente prompt nativo disponibile: solo istruzioni
+    bar.hidden = false;
+    requestAnimationFrame(() => bar.classList.add('show'));
+  }, 3000);
 
   btn.addEventListener('click', async () => {
     if (!deferredPrompt) return;
