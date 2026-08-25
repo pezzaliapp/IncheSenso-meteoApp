@@ -691,6 +691,36 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
 /* ============================================================
+   FIX AUTOMATICO "VISTA RIMPICCIOLITA" (pieghevoli / sito desktop)
+   Su alcuni dispositivi (es. Samsung Z Fold con schermo esterno, o
+   browser in modalità "Sito desktop") il viewport dichiarato è largo
+   come un desktop (~980px) anche se lo schermo è un telefono: tutto
+   appare minuscolo. Qui lo rileviamo e riscaliamo l'interfaccia da
+   soli, senza chiedere nulla all'utente.
+   Criterio: schermo touch + proporzioni da telefono in verticale
+   (altezza/larghezza >= 1.7) + viewport >= 650px. Un tablet vero in
+   verticale ha proporzioni ~1.3-1.4 e NON viene toccato; un telefono
+   normale ha viewport ~390-430px e NON viene toccato.
+   430px è la larghezza di riferimento (grande smartphone).
+   ============================================================ */
+(function () {
+  function fixScale() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const daTelefono = navigator.maxTouchPoints > 0 && w > 0 && h / w >= 1.7;
+    if (daTelefono && w >= 650) {
+      document.documentElement.style.zoom = (w / 430).toFixed(3);
+    } else {
+      document.documentElement.style.zoom = '';
+    }
+  }
+  fixScale();
+  // il Fold cambia schermo quando si apre/chiude: rivaluto
+  window.addEventListener('resize', fixScale);
+  window.addEventListener('orientationchange', fixScale);
+})();
+
+/* ============================================================
    LOCALITÀ — copertura nazionale
    Le allerte vengono da allertameteo.app, che ripubblica i bollettini
    di criticità della Protezione Civile per tutti i 7.904 comuni italiani.
