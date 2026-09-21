@@ -538,6 +538,45 @@
     .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
     .refresh-btn.spinning { animation: spin 1s linear infinite; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    /* Finestra "previsioni in pausa" (Open-Meteo non disponibile) */
+    .svc-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem; padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+      background: rgba(5, 10, 20, 0.72);
+      -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+      animation: svcFade .2s ease-out;
+    }
+    .svc-overlay[hidden] { display: none; }
+    @keyframes svcFade { from { opacity: 0; } to { opacity: 1; } }
+    .svc-box {
+      width: 100%; max-width: 440px; max-height: 90vh; overflow-y: auto;
+      background: var(--surface); color: var(--text);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 1.5rem 1.4rem 1.2rem;
+    }
+    .svc-icon { font-size: 2.6rem; text-align: center; line-height: 1; }
+    .svc-box h2 { font-size: 1.2rem; text-align: center; margin: .6rem 0 .9rem; }
+    .svc-box p { font-size: .92rem; line-height: 1.5; color: var(--text-muted); margin: 0 0 .75rem; }
+    .svc-box p strong { color: var(--text); }
+    .svc-limits {
+      display: flex; justify-content: space-around; gap: .5rem; text-align: center;
+      background: rgba(255,255,255,0.04); border-radius: 12px; padding: .7rem .4rem; margin: 0 0 .9rem;
+    }
+    .svc-limits b { display: block; color: var(--accent); font-size: 1.05rem; }
+    .svc-limits span { font-size: .72rem; color: var(--text-muted); }
+    .svc-free {
+      border-left: 3px solid var(--accent); padding: .1rem 0 .1rem .8rem; margin: .2rem 0 1rem;
+    }
+    .svc-status { min-height: 1.2em; font-size: .82rem; text-align: center; color: var(--warning); margin: 0 0 .8rem; }
+    .svc-actions { display: flex; flex-direction: column; gap: .5rem; }
+    .svc-actions button {
+      font: inherit; font-size: .95rem; border-radius: 12px; padding: .75rem 1rem; cursor: pointer;
+    }
+    .svc-retry { background: var(--accent); color: #0b1120; border: 0; font-weight: 600; }
+    .svc-retry:disabled { opacity: .6; cursor: progress; }
+    .svc-close { background: transparent; color: var(--text-muted); border: 1px solid rgba(148,163,184,0.4); }
   </style>
 </head>
 <body>
@@ -658,7 +697,7 @@
 
   <footer class="app-footer">
     <div class="credits">
-      <span>Previsioni: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)</span>
+      <span>Previsioni: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>), riserva <a href="https://www.met.no/en" target="_blank" rel="noopener">MET Norway</a> (CC BY 4.0)</span>
       <span>Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a></span>
       <span>Mappa: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
       <span>Allerte: Bollettino di criticità del <a href="https://github.com/pcm-dpc/DPC-Bollettini-Criticita-Idrogeologica-Idraulica" target="_blank" rel="noopener">Dipartimento della Protezione Civile</a>, in CSV via <a href="https://github.com/opendatasicilia/DPC-bollettini-criticita-idrogeologica-idraulica" target="_blank" rel="noopener">OpenDataSicilia</a> (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)</span>
@@ -677,6 +716,20 @@
 <div class="update-bar" id="update-bar" role="status" aria-live="polite" hidden>
   <p>È disponibile una nuova versione.</p>
   <button type="button" class="update-btn" id="update-btn">Aggiorna</button>
+</div>
+
+<!-- Finestra mostrata quando le previsioni Open-Meteo non arrivano -->
+<div class="svc-overlay" id="svc-overlay" role="dialog" aria-modal="true" aria-labelledby="svc-title" hidden>
+  <div class="svc-box">
+    <div class="svc-icon" id="svc-icon">⏸️</div>
+    <h2 id="svc-title">Previsioni momentaneamente in pausa</h2>
+    <div id="svc-body"></div>
+    <p class="svc-status" id="svc-status" aria-live="polite"></p>
+    <div class="svc-actions">
+      <button type="button" class="svc-retry" id="svc-retry">🔄 Riprova ora</button>
+      <button type="button" class="svc-close" id="svc-close">Continua con radar e allerte</button>
+    </div>
+  </div>
 </div>
 
 <!-- Banner installazione: compare solo se l'app gira nel browser (non installata).
@@ -1319,22 +1372,352 @@ document.getElementById('refresh-btn').addEventListener('click',function(){
   });
 });
 
-/* WEATHER */
-async function loadWeather() {
+/* WEATHER
+   Open-Meteo gratuito limita le richieste per indirizzo IP (429) e ogni
+   tanto va in timeout. Qui: timeout esplicito, controllo di res.ok, due
+   nuovi tentativi con attesa crescente, motivo dell'errore mostrato
+   all'utente e, se tutto fallisce, l'ultimo dato valido salvato in locale
+   con l'orario ben visibile (mai spacciato per attuale). */
+const WEATHER_CACHE_KEY = 'inchesenso-weather-cache';
+const WEATHER_CACHE_MAX_MS = 6 * 3600 * 1000;   // oltre 6 ore il dato non si mostra
+
+async function fetchWeatherJSON(url) {
+  const attese = [0, 1500];   // poi passa alla fonte di riserva
+  let ultimoErrore;
+  for (const attesa of attese) {
+    if (attesa) await new Promise(r => setTimeout(r, attesa));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+      let data = null;
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok || !data || data.error) {
+        const motivo = (data && data.reason) ? data.reason : 'HTTP ' + res.status;
+        const err = new Error(motivo);
+        err.status = res.status;
+        // 400 = richiesta sbagliata, 429 = limite raggiunto: inutile riprovare
+        if (res.status === 400 || res.status === 429) throw err;
+        ultimoErrore = err;
+        continue;
+      }
+      if (!data.current || !data.hourly || !data.daily) {
+        ultimoErrore = new Error('risposta incompleta');
+        continue;
+      }
+      return data;
+    } catch (e) {
+      if (e.status === 400 || e.status === 429) throw e;
+      ultimoErrore = e.name === 'AbortError' ? new Error('timeout: il server non risponde')
+                   : (e.status ? e : new Error('rete non raggiungibile o richiesta bloccata'));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw ultimoErrore;
+}
+
+
+/* FONTE DI RISERVA: MET Norway (api.met.no, Locationforecast 2.0)
+   Gratuita, senza chiave, dati CC BY 4.0. I termini ammettono richieste
+   dirette dal browser per siti a basso traffico: il browser si identifica
+   con l'header Origin (il dominio del sito). Viene interpellata SOLO se
+   Open-Meteo non risponde, così il traffico resta minimo.
+   I dati vengono convertiti nel formato Open-Meteo, così renderCurrent,
+   renderHourly, renderDaily e la stima grandine non cambiano. */
+const METNO_WMO = {
+  clearsky:0, fair:1, partlycloudy:2, cloudy:3, fog:45,
+  lightrain:61, rain:63, heavyrain:65,
+  lightrainshowers:80, rainshowers:81, heavyrainshowers:82,
+  lightsleet:66, sleet:67, heavysleet:67,
+  lightsleetshowers:66, sleetshowers:67, heavysleetshowers:67,
+  lightsnow:71, snow:73, heavysnow:75,
+  lightsnowshowers:85, snowshowers:85, heavysnowshowers:86
+};
+function metnoToWmo(symbol) {
+  if (!symbol) return null;
+  const base = symbol.replace(/_(day|night|polartwilight)$/, '');
+  if (base.includes('thunder')) return 95;
+  return METNO_WMO[base] ?? null;
+}
+/* temperatura percepita (formula di Steadman usata dal Bureau of Meteorology) */
+function apparentTemp(t, rh, windMs) {
+  const e = rh / 100 * 6.105 * Math.exp(17.27 * t / (237.7 + t));
+  return t + 0.33 * e - 0.70 * windMs - 4.0;
+}
+const dataLocale = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' });   // YYYY-MM-DD
+
+async function fetchMetNo(lat, lon) {
+  const url = 'https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=' +
+              (+lat).toFixed(4) + '&lon=' + (+lon).toFixed(4);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  let res;
+  try { res = await fetch(url, { signal: ctrl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'MET Norway: timeout' : 'MET Norway non raggiungibile'); }
+  finally { clearTimeout(timer); }
+  if (!res.ok) { const err = new Error('MET Norway: HTTP ' + res.status); err.status = res.status; throw err; }
+  const json = await res.json();
+  const serie = json && json.properties && json.properties.timeseries;
+  if (!Array.isArray(serie) || !serie.length) throw new Error('MET Norway: risposta vuota');
+  return metnoToOpenMeteo(serie);
+}
+
+function metnoToOpenMeteo(serie) {
+  const now = Date.now();
+  // istante attuale: l'ultimo passo non successivo a adesso
+  let ic = 0;
+  for (let i = 0; i < serie.length; i++) {
+    if (new Date(serie[i].time).getTime() <= now) ic = i; else break;
+  }
+  const c  = serie[ic].data;
+  const d  = c.instant.details;
+  const s1 = c.next_1_hours || c.next_6_hours || {};
+  const sym = s1.summary && s1.summary.symbol_code;
+  const current = {
+    temperature_2m:       d.air_temperature,
+    relative_humidity_2m: Math.round(d.relative_humidity),
+    apparent_temperature: apparentTemp(d.air_temperature, d.relative_humidity, d.wind_speed),
+    is_day:               sym && sym.endsWith('_night') ? 0 : 1,
+    precipitation:        (c.next_1_hours && c.next_1_hours.details.precipitation_amount) || 0,
+    weather_code:         metnoToWmo(sym) ?? 3,
+    cloud_cover:          Math.round(d.cloud_area_fraction),
+    pressure_msl:         d.air_pressure_at_sea_level,
+    wind_speed_10m:       d.wind_speed * 3.6,
+    wind_direction_10m:   d.wind_from_direction
+  };
+
+  // orarie: i passi con next_1_hours (MET le fornisce per circa 2-3 giorni)
+  const hourly = { time:[], temperature_2m:[], precipitation_probability:[], precipitation:[], weather_code:[], wind_speed_10m:[] };
+  for (const p of serie) {
+    const n1 = p.data.next_1_hours;
+    if (!n1) break;
+    const det = p.data.instant.details;
+    hourly.time.push(p.time);
+    hourly.temperature_2m.push(det.air_temperature);
+    hourly.precipitation_probability.push(null);   // non presente nel formato compact
+    hourly.precipitation.push(n1.details.precipitation_amount);
+    hourly.weather_code.push(metnoToWmo(n1.summary.symbol_code) ?? 3);
+    hourly.wind_speed_10m.push(det.wind_speed * 3.6);
+  }
+
+  // giornaliere: aggregazione per data italiana, senza contare due volte la pioggia
+  const giorni = new Map();
+  let copertoFino = 0;
+  for (const p of serie) {
+    const t = new Date(p.time).getTime();
+    const key = dataLocale.format(new Date(t));
+    if (!giorni.has(key)) giorni.set(key, { max:-Infinity, min:Infinity, pioggia:0, code:null });
+    const g = giorni.get(key);
+    const temp = p.data.instant.details.air_temperature;
+    g.max = Math.max(g.max, temp); g.min = Math.min(g.min, temp);
+    const n1 = p.data.next_1_hours, n6 = p.data.next_6_hours;
+    if (t >= copertoFino) {
+      if (n1)      { g.pioggia += n1.details.precipitation_amount || 0; copertoFino = t + 3600e3; }
+      else if (n6) { g.pioggia += n6.details.precipitation_amount || 0; copertoFino = t + 6 * 3600e3; }
+    }
+    const blocco = n1 || n6;
+    const code = blocco ? metnoToWmo(blocco.summary.symbol_code) : null;
+    if (code != null && (g.code == null || code > g.code)) g.code = code;   // il fenomeno più significativo
+  }
+  const daily = { time:[], weather_code:[], temperature_2m_max:[], temperature_2m_min:[], precipitation_sum:[], precipitation_probability_max:[] };
+  for (const [key, g] of giorni) {
+    if (daily.time.length >= 7) break;
+    daily.time.push(key);
+    daily.weather_code.push(g.code ?? 3);
+    daily.temperature_2m_max.push(g.max);
+    daily.temperature_2m_min.push(g.min);
+    daily.precipitation_sum.push(g.pioggia);
+    daily.precipitation_probability_max.push(null);
+  }
+  return { current, hourly, daily, _fonte: 'metno' };
+}
+
+/* Se Open-Meteo ha risposto 429, per un quarto d'ora vado direttamente
+   sulla riserva: riprovare subito consumerebbe altre richieste per nulla. */
+let openMeteoPausaFino = 0;
+
+function saveWeatherCache(data) {
+  try {
+    localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({
+      lat: state.lat, lon: state.lon, ts: Date.now(), data
+    }));
+  } catch (e) {}
+}
+function readWeatherCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(WEATHER_CACHE_KEY) || 'null');
+    if (!c || !c.data) return null;
+    if (Math.abs(c.lat - state.lat) > 0.01 || Math.abs(c.lon - state.lon) > 0.01) return null;
+    if (Date.now() - c.ts > WEATHER_CACHE_MAX_MS) return null;
+    return c;
+  } catch (e) { return null; }
+}
+
+
+/* FINESTRA "PREVISIONI IN PAUSA"
+   Compare una volta per episodio: se l'utente la chiude, i giri automatici
+   ogni 10 minuti non la ripropongono; torna solo dopo che il servizio ha
+   funzionato ed è caduto di nuovo. Radar e bollettini non dipendono da
+   Open-Meteo e restano utilizzabili. */
+let svcOverlayDismissed = false;
+let svcLastFocus = null;
+
+const SVC_FREE_NOTE =
+  '<p class="svc-free"><strong>IncheSenso è gratuita, senza pubblicità e senza account.</strong> ' +
+  'Per restarlo usa solo fonti aperte, che in cambio chiedono di rispettare dei limiti d\u2019uso. ' +
+  '\u00C8 il prezzo di un servizio davvero gratuito: nessuno paga, quindi nessuno ha la precedenza.</p>';
+
+function svcBody(kind, cacheTs) {
+  const ultimi = cacheTs
+    ? '<p>Intanto vedi gli <strong>ultimi dati ricevuti alle ' +
+      new Date(cacheTs).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) +
+      '</strong>: controlla sempre il radar per la situazione in tempo reale.</p>'
+    : '';
+  if (kind === 'limit') {
+    return (
+      '<p>Le previsioni arrivano da <strong>Open-Meteo</strong>, un servizio meteo libero che, per l\u2019uso gratuito, ' +
+      'fissa un tetto alle richieste di ogni connessione internet:</p>' +
+      '<div class="svc-limits">' +
+        '<div><b>600</b><span>al minuto</span></div>' +
+        '<div><b>5.000</b><span>all\u2019ora</span></div>' +
+        '<div><b>10.000</b><span>al giorno</span></div>' +
+      '</div>' +
+      '<p>Anche lasciata aperta tutto il giorno, l\u2019app ne usa circa 150. Il tetto si raggiunge quando molti dispositivi ' +
+      'escono su internet <strong>dallo stesso indirizzo</strong>: reti aziendali, Wi-Fi pubblici, VPN, ' +
+      'alcuni operatori mobili. Anche la fonte di riserva, <strong>MET Norway</strong>, in questo momento non risponde. ' +
+      'Di solito basta attendere qualche minuto, oppure passare a un\u2019altra rete (per esempio i dati del telefono).</p>' +
+      SVC_FREE_NOTE + ultimi
+    );
+  }
+  return (
+    '<p>Le previsioni arrivano da <strong>Open-Meteo</strong> e, come riserva, da <strong>MET Norway</strong> ' +
+    '(l\u2019istituto meteorologico norvegese). In questo momento <strong>nessuna delle due risponde</strong>. ' +
+    'Pu\u00F2 essere un disservizio temporaneo oppure un blocco della tua connessione. ' +
+    'Se il problema resta, prova da un\u2019altra rete (per esempio i dati del telefono).</p>' +
+    SVC_FREE_NOTE + ultimi
+  );
+}
+
+function showWeatherOverlay(kind, cacheTs) {
+  const ov = document.getElementById('svc-overlay');
+  document.getElementById('svc-icon').textContent  = kind === 'limit' ? '\u23F8\uFE0F' : '\uD83D\uDCE1';
+  document.getElementById('svc-title').textContent = kind === 'limit'
+    ? 'Previsioni momentaneamente in pausa'
+    : 'Previsioni non raggiungibili';
+  document.getElementById('svc-body').innerHTML = svcBody(kind, cacheTs);
+  if (!ov.hidden) return;   // già aperta: aggiorno solo il testo
+  if (svcOverlayDismissed) return;
+  document.getElementById('svc-status').textContent = '';
+  svcLastFocus = document.activeElement;
+  ov.hidden = false;
+  document.getElementById('svc-retry').focus();
+}
+function hideWeatherOverlay(byUser) {
+  const ov = document.getElementById('svc-overlay');
+  if (byUser) svcOverlayDismissed = true;
+  if (ov.hidden) return;
+  ov.hidden = true;
+  if (svcLastFocus && svcLastFocus.focus) svcLastFocus.focus();
+}
+
+document.getElementById('svc-close').addEventListener('click', () => hideWeatherOverlay(true));
+document.getElementById('svc-overlay').addEventListener('click', e => {
+  if (e.target.id === 'svc-overlay') hideWeatherOverlay(true);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('svc-overlay').hidden) hideWeatherOverlay(true);
+});
+document.getElementById('svc-retry').addEventListener('click', async function () {
+  const status = document.getElementById('svc-status');
+  this.disabled = true;
+  this.textContent = '\u23F3 Verifico\u2026';
+  status.textContent = '';
+  const ok = await loadWeather({ fromOverlay: true });
+  this.disabled = false;
+  this.textContent = '\uD83D\uDD04 Riprova ora';
+  if (ok) {
+    hideWeatherOverlay(false);
+  } else {
+    status.textContent = 'Ancora non disponibile \u2014 ultimo tentativo alle ' +
+      new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '. Riprova tra qualche minuto.';
+  }
+});
+
+async function loadWeather(opts = {}) {
   const el=document.getElementById('current-card');
   const token = placeToken;
-  try {
-    const url=`https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&timezone=Europe/Rome&forecast_days=7`;
-    const res=await fetch(url);
-    const data=await res.json();
-    if (token !== placeToken) return;   // località cambiata: risposta obsoleta
-    state.weather=data;
-    renderCurrent(data); renderHourly(data); renderDaily(data);
-    updateHailRisk();
-  } catch(e) {
-    if (token !== placeToken) return;
-    el.innerHTML='<div class="error-msg">Errore caricamento meteo. Riprova più tardi.</div>';
+  const url=`https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&timezone=Europe/Rome&forecast_days=7`;
+  let data, erroreOM = null;
+  if (Date.now() >= openMeteoPausaFino) {
+    try {
+      data = await fetchWeatherJSON(url);
+    } catch (e) {
+      erroreOM = e;
+      console.warn('[meteo] Open-Meteo non disponibile:', e.message);
+      if (e.status === 429) openMeteoPausaFino = Date.now() + 15 * 60e3;
+    }
+  } else {
+    erroreOM = Object.assign(new Error('in pausa dopo limite raggiunto'), { status: 429 });
   }
+  if (!data) {
+    if (token !== placeToken) return;
+    try {
+      data = await fetchMetNo(state.lat, state.lon);
+      console.info('[meteo] dati dalla fonte di riserva MET Norway');
+    } catch (e2) {
+      console.warn('[meteo] anche MET Norway non disponibile:', e2.message);
+    }
+  }
+  if (!data) {
+    const e = erroreOM || new Error('servizi non raggiungibili');
+    if (token !== placeToken) return;
+    const kind = e.status === 429 ? 'limit' : 'down';
+    const motivo = kind === 'limit'
+      ? 'Limite d\u2019uso gratuito di Open-Meteo raggiunto da questa connessione.'
+      : 'Servizio previsioni non raggiungibile.';
+    const cache = readWeatherCache();
+    showWeatherOverlay(kind, cache ? cache.ts : null);
+    if (cache) {
+      try {
+        state.weather = cache.data;
+        renderCurrent(cache.data); renderHourly(cache.data); renderDaily(cache.data);
+        const ora = new Date(cache.ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+        el.insertAdjacentHTML('afterbegin',
+          '<div class="error-msg" style="margin-bottom:1rem">⚠️ ' + esc(motivo) +
+          '<br>Mostro gli ultimi dati ricevuti alle ' + ora + '.</div>');
+        updateHailRisk();
+        return false;
+      } catch (err) { /* cache corrotta: cado nel messaggio sotto */ }
+    }
+    state.weather = null;
+    el.innerHTML = '<div class="error-msg">Previsioni non disponibili.<br><small>' + esc(motivo) +
+      '</small><br><button type="button" class="update-btn" style="margin-top:.7rem" ' +
+      'onclick="svcOverlayDismissed=false;showWeatherOverlay(\'' + kind + '\', null)">Perch\u00E9?</button></div>';
+    document.getElementById('hourly-list').innerHTML = '';
+    document.getElementById('daily-list').innerHTML = '';
+    updateHailRisk();
+    return false;
+  }
+  if (token !== placeToken) return true;   // località cambiata: risposta obsoleta
+  state.weather=data;
+  saveWeatherCache(data);
+  svcOverlayDismissed = false;             // servizio tornato: nuovo episodio, nuova finestra
+  hideWeatherOverlay(false);
+  // gli errori di disegno non devono passare per "errore di rete"
+  try {
+    renderCurrent(data);
+    if (data._fonte === 'metno') {
+      el.insertAdjacentHTML('beforeend',
+        '<p class="source-note" style="text-align:center;margin-top:.8rem">\u2139\uFE0F Open-Meteo non disponibile: ' +
+        'previsioni dalla fonte di riserva <a href="https://www.met.no/en" target="_blank" rel="noopener">MET Norway</a> ' +
+        '(<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>).</p>');
+    }
+  } catch (e) { console.error('[meteo] renderCurrent', e); }
+  try { renderHourly(data); }  catch (e) { console.error('[meteo] renderHourly', e); }
+  try { renderDaily(data); }   catch (e) { console.error('[meteo] renderDaily', e); }
+  try { updateHailRisk(); }    catch (e) { console.error('[meteo] updateHailRisk', e); }
+  return true;
 }
 function renderCurrent(data) {
   const c=data.current, code=c.weather_code, icon=WMO[code]||'❓', desc=WMO_DESC[code]||'Sconosciuto';
@@ -2402,6 +2785,11 @@ function updateHailRisk() {
     }
   };
   const cfg = configs[risk];
+  if (!state.weather && risk === 'low') {
+    cfg.icon = '❓'; cfg.status = 'Dati incompleti';
+    cfg.desc = 'Previsioni non disponibili: la stima usa solo il bollettino DPC.';
+    cfg.tips = ['Controlla il radar per la situazione in tempo reale'];
+  }
   card.innerHTML =
     '<div class="hail-indicator">' +
       '<div class="hail-icon">' + cfg.icon + '</div>' +

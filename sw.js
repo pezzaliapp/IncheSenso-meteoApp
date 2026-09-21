@@ -2,7 +2,7 @@
    sottocartella (GitHub Pages) sia in radice (Netlify, Vercel, dominio proprio),
    e sopravvive a una rinomina del repository senza modifiche. */
 const BASE_PATH = new URL('./', self.location).pathname;
-const CACHE_NAME = 'meteo-it-v26';
+const CACHE_NAME = 'meteo-it-v28';
 
 const STATIC_ASSETS = [
   BASE_PATH,
@@ -30,7 +30,8 @@ const STATIC_ASSETS = [
    Il meteo vecchio è al massimo inutile. */
 const LIVE_HOSTS = [
   'open-meteo.com',
-  'rainviewer.com'
+  'rainviewer.com',
+  'api.met.no'
 ];
 
 /* MAI dalla cache: un'allerta scaduta mostrata come attuale è peggio di
