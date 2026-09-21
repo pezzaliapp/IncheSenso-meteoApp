@@ -77,12 +77,15 @@ operatori mobili.
 Se Open-Meteo non risponde, l'app segue questa sequenza:
 
 1. **Nuovo tentativo** dopo 1,5 secondi (solo per errori di rete o timeout di 12 s).
-   Se la risposta è `429` (limite superato) non riprova e, per 15 minuti, salta
+   Se la risposta è `429` (limite superato) non riprova e, per un'ora (limite
+   giornaliero) o 15 minuti (limite orario o al minuto), salta
    direttamente al punto 2 per non consumare altre richieste.
 2. **Fonte di riserva MET Norway** (Locationforecast 2.0, istituto meteorologico
    norvegese, servizio pubblico senza piani a pagamento). I dati vengono convertiti nel
    formato Open-Meteo, quindi schede, previsioni orarie, 7 giorni e stima grandine
-   funzionano senza modifiche. Sotto il meteo attuale compare una nota con la fonte.
+   funzionano senza modifiche. Sotto il meteo attuale compare una nota con la fonte
+   e il motivo esatto (es. "superato il limite gratuito di 10.000 richieste giornaliere
+   da questa connessione"), letto dalla risposta di Open-Meteo.
    I termini di MET Norway ammettono chiamate dirette dal browser per siti a basso
    traffico (il browser si identifica con l'header `Origin`); usata solo come riserva,
    l'app resta ampiamente in quel perimetro. Se un giorno diventasse la fonte
@@ -183,7 +186,7 @@ cosa sta effettivamente usando un utente che segnala un problema.
 - **Fonte di riserva MET Norway** per le previsioni, attivata in automatico quando
   Open-Meteo non risponde.
 - **Gestione degli errori** delle previsioni: timeout, controllo della risposta,
-  pausa di 15 minuti su Open-Meteo dopo un `429`.
+  pausa su Open-Meteo dopo un `429` (un'ora se è il limite giornaliero, altrimenti 15 minuti).
 - **Ultimi dati salvati** mostrati con l'orario quando nessuna fonte risponde.
 - **Finestra "Previsioni in pausa"** con spiegazione dei limiti gratuiti e tasto Riprova.
 - **Rischio grandine** onesto: senza previsioni mostra "Dati incompleti" invece di

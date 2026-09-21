@@ -577,6 +577,17 @@
     .svc-retry { background: var(--accent); color: #0b1120; border: 0; font-weight: 600; }
     .svc-retry:disabled { opacity: .6; cursor: progress; }
     .svc-close { background: transparent; color: var(--text-muted); border: 1px solid rgba(148,163,184,0.4); }
+
+    .riserva-note {
+      margin-top: 1rem; padding: .85rem 1rem; border-radius: 12px;
+      background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.25);
+      font-size: .82rem; line-height: 1.5; color: var(--text-muted);
+    }
+    .riserva-note p { margin: 0 0 .45rem; }
+    .riserva-note p:last-child { margin-bottom: 0; }
+    .riserva-note strong { color: var(--text); }
+    .riserva-note a { color: var(--accent); }
+    .riserva-note .riserva-claim { color: var(--accent); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -1536,6 +1547,21 @@ function metnoToOpenMeteo(serie) {
 /* Se Open-Meteo ha risposto 429, per un quarto d'ora vado direttamente
    sulla riserva: riprovare subito consumerebbe altre richieste per nulla. */
 let openMeteoPausaFino = 0;
+let openMeteoMotivo = null;   // ultimo errore di Open-Meteo, per spiegarlo all'utente
+
+/* Traduce la risposta di Open-Meteo in una frase comprensibile.
+   Il limite vale per la connessione (indirizzo IP) di chi usa l'app,
+   non per l'app nel suo insieme: il testo lo dice in modo esplicito. */
+function motivoOpenMeteo(err) {
+  const r = (err && err.message || '').toLowerCase();
+  if (err && err.status === 429) {
+    if (r.includes('daily'))    return { tipo: 'giorno', testo: 'dalla rete che stai usando oggi sono partite <strong>oltre 10.000 richieste</strong> a Open-Meteo, il tetto giornaliero del suo servizio gratuito' };
+    if (r.includes('hourly'))   return { tipo: 'ora',    testo: 'dalla rete che stai usando sono partite <strong>oltre 5.000 richieste in un\u2019ora</strong> a Open-Meteo, il tetto orario del suo servizio gratuito' };
+    if (r.includes('minutely')) return { tipo: 'minuto', testo: 'dalla rete che stai usando sono partite <strong>oltre 600 richieste in un minuto</strong> a Open-Meteo, il tetto del suo servizio gratuito' };
+    return { tipo: 'limite', testo: 'dalla rete che stai usando \u00E8 stato raggiunto il tetto di richieste del servizio gratuito di Open-Meteo' };
+  }
+  return { tipo: 'rete', testo: 'Open-Meteo, la nostra fonte principale, in questo momento non risponde' };
+}
 
 function saveWeatherCache(data) {
   try {
@@ -1655,7 +1681,11 @@ async function loadWeather(opts = {}) {
     } catch (e) {
       erroreOM = e;
       console.warn('[meteo] Open-Meteo non disponibile:', e.message);
-      if (e.status === 429) openMeteoPausaFino = Date.now() + 15 * 60e3;
+      openMeteoMotivo = motivoOpenMeteo(e);
+      // dopo un 429 non insisto: un'ora se è il limite giornaliero, altrimenti 15 minuti
+      if (e.status === 429) {
+        openMeteoPausaFino = Date.now() + (openMeteoMotivo.tipo === 'giorno' ? 60 : 15) * 60e3;
+      }
     }
   } else {
     erroreOM = Object.assign(new Error('in pausa dopo limite raggiunto'), { status: 429 });
@@ -1702,6 +1732,7 @@ async function loadWeather(opts = {}) {
   if (token !== placeToken) return true;   // località cambiata: risposta obsoleta
   state.weather=data;
   saveWeatherCache(data);
+  if (data._fonte !== 'metno') openMeteoMotivo = null;
   svcOverlayDismissed = false;             // servizio tornato: nuovo episodio, nuova finestra
   hideWeatherOverlay(false);
   // gli errori di disegno non devono passare per "errore di rete"
@@ -1709,9 +1740,14 @@ async function loadWeather(opts = {}) {
     renderCurrent(data);
     if (data._fonte === 'metno') {
       el.insertAdjacentHTML('beforeend',
-        '<p class="source-note" style="text-align:center;margin-top:.8rem">\u2139\uFE0F Open-Meteo non disponibile: ' +
-        'previsioni dalla fonte di riserva <a href="https://www.met.no/en" target="_blank" rel="noopener">MET Norway</a> ' +
-        '(<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>).</p>');
+        '<div class="riserva-note">' +
+          '<p><strong>\u2139\uFE0F Se vedi questo messaggio</strong>, ' + (openMeteoMotivo || motivoOpenMeteo(null)).testo + '.</p>' +
+          '<p>Nessun problema: <strong>le previsioni continuano</strong> grazie alla nostra fonte di riserva, ' +
+          '<a href="https://www.met.no/en" target="_blank" rel="noopener">MET Norway</a> ' +
+          '(<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>), ' +
+          'l\u2019istituto meteorologico norvegese.</p>' +
+          '<p class="riserva-claim">IncheSenso usa solo fonti aperte: gratuita, senza pubblicit\u00E0 e senza account. Anche oggi.</p>' +
+        '</div>');
     }
   } catch (e) { console.error('[meteo] renderCurrent', e); }
   try { renderHourly(data); }  catch (e) { console.error('[meteo] renderHourly', e); }
